@@ -119,6 +119,7 @@ describe("withWorktreeInventory", () => {
     name: "Before",
     time: { created: 1, updated: 1, active: 1 },
     sandboxes: [],
+    folders: [],
   }
 
   test("derives the workspace list from the inventory, excluding the project root", () => {

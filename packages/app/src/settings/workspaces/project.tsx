@@ -1,4 +1,6 @@
+import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
+import { IconButton } from "@opencode/ui/icon-button"
 import {
   displayName,
   getProjectAvatarVariant,
@@ -157,6 +159,41 @@ export const SettingsProjectGeneral: Component<{
                     )
                   }}
                 </For>
+              </div>
+            </SettingsRow>
+          </Show>
+
+          <Show when={props.project.id && props.project.id !== "global"}>
+            <SettingsRow
+              title={language.t("project.settings.folders.title")}
+              description={language.t("project.settings.folders.description")}
+            >
+              <div class="flex min-w-0 flex-col items-end gap-1">
+                <For each={model.store.folders}>
+                  {(folder) => (
+                    <div class="flex min-w-0 items-center gap-1">
+                      <span class="truncate font-mono text-[13px]" dir="ltr">
+                        {folder}
+                      </span>
+                      <IconButton
+                        type="button"
+                        variant="ghost-muted"
+                        size="small"
+                        aria-label={language.t("project.settings.folders.remove", { folder })}
+                        icon={<Icon name="close" size="small" />}
+                        onClick={() => model.removeFolder(folder)}
+                      />
+                    </div>
+                  )}
+                </For>
+                <Button
+                  data-action="settings-project-folders-add"
+                  size="small"
+                  variant="neutral"
+                  onClick={model.addFolders}
+                >
+                  {language.t("project.settings.folders.add")}
+                </Button>
               </div>
             </SettingsRow>
           </Show>

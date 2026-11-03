@@ -134,6 +134,7 @@ describe("normalizeProjectInfo", () => {
       canonical: "/repo",
       time: { created: 1, updated: 1, active: 1 },
       sandboxes: [],
+      folders: [],
     }
 
     expect(normalizeProjectInfo({ ...project, vcs: "git" }).vcs).toBe("git")

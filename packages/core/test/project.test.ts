@@ -61,12 +61,14 @@ describe("Project.list", () => {
           commands: { start: "bun dev" },
           time: { created: 1, updated: 1, active: 4 },
           sandboxes: [abs("/older/sandbox")],
+          folders: [],
         },
         {
           id: Project.ID.make("newer"),
           canonical: abs("/newer"),
           time: { created: 2, updated: 2, active: 3 },
           sandboxes: [],
+          folders: [],
         },
       ])
     }),
@@ -118,6 +120,7 @@ describe("Project.update", () => {
         canonical: abs("/update"),
         time: { created: 1, updated: expect.any(Number), active: 1 },
         sandboxes: [],
+        folders: [],
       })
     }),
   )

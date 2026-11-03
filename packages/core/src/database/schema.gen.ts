@@ -129,6 +129,7 @@ const schema: Omit<DatabaseMigration.Migration, "id"> = {
           \`time_active\` integer DEFAULT 0 NOT NULL,
           \`time_archived\` integer,
           \`sandboxes\` text NOT NULL,
+          \`folders\` text DEFAULT '[]' NOT NULL,
           \`commands\` text
         );
       `)

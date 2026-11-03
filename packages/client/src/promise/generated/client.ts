@@ -2046,6 +2046,7 @@ export function make(options: ClientOptions) {
               name: input["name"],
               icon: input["icon"],
               commands: input["commands"],
+              folders: input["folders"],
             },
             successStatus: 200,
             declaredStatuses: [400, 401, 404],

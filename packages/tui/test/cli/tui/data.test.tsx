@@ -169,6 +169,7 @@ test("proactively syncs project metadata most recently active first", async () =
         name: "Old project",
         time: { created: 1, updated: 1, active: 3 },
         sandboxes: [],
+        folders: [],
       },
       {
         id: "proj_test",
@@ -176,6 +177,7 @@ test("proactively syncs project metadata most recently active first", async () =
         name: "OpenCode",
         time: { created: 1, updated: 2, active: 2 },
         sandboxes: [],
+        folders: [],
       },
     ])
   }, events)
@@ -207,6 +209,7 @@ test("proactively syncs project metadata most recently active first", async () =
         name: "Old project",
         time: { created: 1, updated: 1, active: 3 },
         sandboxes: [],
+        folders: [],
       },
       {
         id: "proj_test",
@@ -214,6 +217,7 @@ test("proactively syncs project metadata most recently active first", async () =
         name: "OpenCode",
         time: { created: 1, updated: 2, active: 2 },
         sandboxes: [],
+        folders: [],
       },
     ])
   } finally {

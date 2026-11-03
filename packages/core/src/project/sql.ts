@@ -25,6 +25,7 @@ export const ProjectTable = sqliteTable("project", {
     .$defaultFn(() => Date.now()),
   time_archived: integer(),
   sandboxes: absoluteArrayColumn().notNull(),
+  folders: absoluteArrayColumn().notNull().default([]),
   commands: text({ mode: "json" }).$type<{ start?: string }>(),
 })
 

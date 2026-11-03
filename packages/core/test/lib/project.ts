@@ -12,6 +12,7 @@ export const globalProjectNode = makeGlobalNode({
       const database = yield* Database.Service
       return Project.Service.of({
         list: () => Effect.succeed([]),
+        get: () => Effect.undefined,
         update: () => Effect.die("not implemented"),
         activate: () => Effect.void,
         sweep: () => Effect.void,

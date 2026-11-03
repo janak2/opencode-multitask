@@ -39,6 +39,7 @@ describe("isWorkspaceDirectory", () => {
       canonical: root,
       time: { created: 1, updated: 1, active: 1 },
       sandboxes: [],
+      folders: [],
     }),
     [
       { directory: root },

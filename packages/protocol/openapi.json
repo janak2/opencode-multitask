@@ -8368,6 +8368,12 @@
                   },
                   "commands": {
                     "$ref": "#/components/schemas/Project.Commands"
+                  },
+                  "folders": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/AbsolutePath"
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -21280,9 +21286,15 @@
             "items": {
               "type": "string"
             }
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AbsolutePath"
+            }
           }
         },
-        "required": ["id", "canonical", "time", "sandboxes"],
+        "required": ["id", "canonical", "time", "sandboxes", "folders"],
         "additionalProperties": false
       },
       "Project.Commands": {
@@ -26691,9 +26703,15 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "folders": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AbsolutePath"
+                }
               }
             },
-            "required": ["id", "canonical", "time", "sandboxes"],
+            "required": ["id", "canonical", "time", "sandboxes", "folders"],
             "additionalProperties": false
           }
         },

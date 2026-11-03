@@ -2,6 +2,7 @@ export * as DesktopInitialization from "./desktop-initialization"
 
 import { app } from "electron"
 import { Context, Effect, Layer } from "effect"
+import { readdir } from "node:fs/promises"
 import { DesktopLogging } from "../native/logging"
 import { marks } from "./marks"
 import {
@@ -29,6 +30,16 @@ export const layer = Layer.effect(
     )
     yield* Effect.promise(() => app.whenReady())
     yield* prepareDesktop
+
+    // Reading each protected folder once makes macOS ask for access at launch instead of mid-session.
+    if (process.platform === "darwin")
+      yield* Effect.forkScoped(
+        Effect.forEach(
+          ["desktop", "documents", "downloads"] as const,
+          (name) => Effect.tryPromise(() => readdir(app.getPath(name))).pipe(Effect.ignore),
+          { discard: true },
+        ),
+      )
     marks.init = Date.now()
 
     return Service.of({

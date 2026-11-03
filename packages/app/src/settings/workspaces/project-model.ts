@@ -7,11 +7,14 @@ import { useLanguage } from "@/runtime/i18n/language"
 import type { LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
 import { showToast } from "@/shell/notifications/toast"
+import { homeProjectDirectories } from "@/shell/layout/helpers"
+import { useDirectoryPicker } from "@/workspaces/selection/picker"
 
-type ProjectPatch = Pick<ProjectUpdateInput, "name" | "icon" | "commands">
+type ProjectPatch = Pick<ProjectUpdateInput, "name" | "icon" | "commands" | "folders">
 
 export function createEditProjectModel(props: { project: LocalProject; server: ServerConnection.Any }) {
   const language = useLanguage()
+  const pickDirectory = useDirectoryPicker()
   const global = useGlobal()
   const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
   const folderName = createMemo(() => getFilename(props.project.worktree))
@@ -22,6 +25,7 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
     color: props.project.icon?.color,
     iconOverride: props.project.icon?.override,
     startup: props.project.commands?.start ?? "",
+    folders: [...(props.project.folders ?? [])],
     dragOver: false,
     iconHover: false,
     saving: 0,
@@ -88,6 +92,11 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
     })
   }
 
+  const saveFolders = (folders: string[]) => {
+    setStore("folders", folders)
+    persist({ folders }, () => {})
+  }
+
   function selectFile(file: File) {
     if (!file.type.startsWith("image/")) return
     const reader = new FileReader()
@@ -110,6 +119,23 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
     defaultName,
     saveName,
     saveStartup,
+    addFolders() {
+      pickDirectory({
+        server: props.server,
+        title: language.t("project.settings.folders.add"),
+        multiple: true,
+        onSelect: (result) => {
+          const added = homeProjectDirectories(result).filter(
+            (folder) => folder !== props.project.worktree && !store.folders.includes(folder),
+          )
+
+          if (added.length) saveFolders([...store.folders, ...new Set(added)])
+        },
+      })
+    },
+    removeFolder(folder: string) {
+      saveFolders(store.folders.filter((item) => item !== folder))
+    },
     setColor(value: string | undefined) {
       setStore("color", value)
       saveIcon(value, store.iconOverride)

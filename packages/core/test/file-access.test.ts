@@ -2,9 +2,11 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
+import { Database } from "@opencode/core/database/database"
 import { FileAccess } from "@opencode/core/file-access"
 import { Location } from "@opencode/core/location"
 import { Permission } from "@opencode/core/permission"
+import { ProjectTable } from "@opencode/core/project/sql"
 import { Session } from "@opencode/core/session"
 import { Tool } from "@opencode/core/tool"
 import { AbsolutePath } from "@opencode/core/schema"
@@ -25,7 +27,7 @@ const slash = (file: string) => file.replaceAll("\\", "/")
 
 function provide(requests: Permission.AssertInput[], denied?: string) {
   return Effect.provide(
-    AppNodeBuilder.build(LayerNode.group([FileAccess.node, Location.node]), [
+    AppNodeBuilder.build(LayerNode.group([FileAccess.node, Location.node, Database.node]), [
       Location.node.replace(tempLocationLayer),
       Permission.node.replace(
         permissionLayer({
@@ -44,6 +46,29 @@ function provide(requests: Permission.AssertInput[], denied?: string) {
     ]),
   )
 }
+
+describe("FileAccess.resolve", () => {
+  it.live("treats paths inside a project's extra folder as internal", () =>
+    Effect.gen(function* () {
+      const extra = yield* tmpdirScoped()
+      const database = yield* Database.Service
+      const location = yield* Location.Service
+      yield* database.db
+        .insert(ProjectTable)
+        .values({
+          id: location.project.id,
+          worktree: location.project.directory,
+          sandboxes: [],
+          folders: [AbsolutePath.make(extra.path)],
+        })
+        .run()
+      const access = yield* FileAccess.Service
+      const target = yield* access.resolve({ path: path.join(extra.path, "notes.txt"), kind: "file" })
+
+      expect(target.externalDirectory).toBeUndefined()
+    }).pipe(provide([])),
+  )
+})
 
 describe("FileAccess.authorizeRead", () => {
   it.live("returns an absolute target and preserves invocation identity on the read assertion", () => {

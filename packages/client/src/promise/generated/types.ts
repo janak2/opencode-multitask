@@ -788,6 +788,7 @@ export type Project = {
   commands?: ProjectCommands
   time: ProjectTime
   sandboxes: Array<string>
+  folders: Array<AbsolutePath>
 }
 
 export type PermissionRequest = {
@@ -1810,6 +1811,7 @@ export type ProjectUpdated = {
     commands?: ProjectCommands
     time: ProjectTime
     sandboxes: Array<string>
+    folders: Array<AbsolutePath>
   }
 }
 
@@ -4162,6 +4164,7 @@ export type ProjectUpdateInput = {
   readonly name?: string | undefined
   readonly icon?: { readonly url?: string; readonly override?: string; readonly color?: string } | undefined
   readonly commands?: { readonly start?: string } | undefined
+  readonly folders?: ReadonlyArray<string> | undefined
 }
 
 export type ProjectUpdateOutput = Project
