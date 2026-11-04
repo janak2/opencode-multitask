@@ -189,7 +189,7 @@ export function SidebarInbox() {
   )
 }
 
-function SectionHeader(props: { label: string; count?: number; expanded?: boolean; onToggle?: () => void }) {
+export function SectionHeader(props: { label: string; count?: number; expanded?: boolean; onToggle?: () => void }) {
   const content = (): JSX.Element => (
     <>
       <span class="min-w-0 truncate">{props.label}</span>

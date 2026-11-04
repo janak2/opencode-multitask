@@ -885,6 +885,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                 fallback={
                                   <TitlebarTabStrip
                                     orientation="vertical"
+                                    grouped
                                     tabs={tabsStore}
                                     currentTab={currentTab()}
                                     onNavigate={(tab, el) => {
