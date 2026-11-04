@@ -29,6 +29,10 @@ import { notifySessionTabsRemoved } from "./session-events"
 import { setSidebarUnread } from "@/shell/sidebar-peek"
 import { SectionHeader } from "./inbox"
 import { displayName } from "@opencode/ui/project-avatar"
+import { IconButton } from "@opencode/ui/icon-button"
+import { Icon } from "@opencode/ui/icon"
+import { Tooltip } from "@opencode/ui/tooltip"
+import { useSettingsSurface } from "@/settings/surface"
 import type { SessionInfo } from "@opencode/client/promise"
 
 export const previousSessionCommand = { id: "session.previous", keybind: "alt+arrowup" }
@@ -396,6 +400,7 @@ export function TitlebarTabStrip(props: {
   const tabs = useTabs()
   const language = useLanguage()
   const command = useCommand()
+  const settingsSurface = useSettingsSurface()
   const vertical = () => props.orientation === "vertical"
   let contentRef!: HTMLDivElement
   let scrollRef!: HTMLDivElement
@@ -437,13 +442,25 @@ export function TitlebarTabStrip(props: {
 
   // Groups follow their first tab's place in the strip; tabs whose project is unknown lead without a header.
   const groups = createMemo(() => {
-    if (!props.grouped) return [{ key: "", label: "", tabs: props.tabs }]
-    const byKey = new Map<string, { key: string; label: string; tabs: Tab[] }>()
+    if (!props.grouped) return [{ key: "", label: "", settings: undefined, tabs: props.tabs }]
+
+    const byKey = new Map<
+      string,
+      { key: string; label: string; settings: { server: string; project: string } | undefined; tabs: Tab[] }
+    >()
 
     props.tabs.forEach((tab) => {
       const project = tabProject(tab)
       const key = project ? `${tab.server}\n${project.worktree}` : ""
-      const group = byKey.get(key) ?? { key, label: project ? displayName(project) : "", tabs: [] }
+
+      const group = byKey.get(key) ?? {
+        key,
+        label: project ? displayName(project) : "",
+        // A folder the server has no project for has no settings page.
+        settings: project && "id" in project ? { server: tab.server, project: project.worktree } : undefined,
+        tabs: [],
+      }
+
       group.tabs.push(tab)
       byKey.set(key, group)
     })
@@ -702,7 +719,30 @@ export function TitlebarTabStrip(props: {
                 return (
                   // Hidden, not unmounted: a session tab must stay mounted to load and become visible.
                   <div classList={{ "flex flex-col gap-px": shown(), hidden: !shown() }}>
-                    <Show when={group()?.label}>{(label) => <SectionHeader label={label()} />}</Show>
+                    <Show when={group()?.label}>
+                      {(label) => (
+                        <div class="flex items-center">
+                          <div class="min-w-0 flex-1">
+                            <SectionHeader label={label()} />
+                          </div>
+                          <Show when={group()?.settings}>
+                            {(settings) => (
+                              <Tooltip placement="right" value={language.t("project.settings.title")} class="shrink-0">
+                                <IconButton
+                                  type="button"
+                                  data-action="vertical-tabs-project-settings"
+                                  variant="ghost-muted"
+                                  size="small"
+                                  icon={<Icon name="edit" />}
+                                  aria-label={language.t("project.settings.title")}
+                                  onClick={() => settingsSurface.openProject(settings())}
+                                />
+                              </Tooltip>
+                            )}
+                          </Show>
+                        </div>
+                      )}
+                    </Show>
                     {tabList(() => group()?.tabs ?? [])}
                   </div>
                 )
