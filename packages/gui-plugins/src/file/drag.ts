@@ -11,13 +11,16 @@ const buildDragImage = (target: HTMLElement) => {
     "flex items-center gap-x-2 px-2 py-1 bg-surface-raised-base rounded-md border border-v2-border-border-base text-12-regular text-text-strong"
   image.style.position = "absolute"
   image.style.top = "-1000px"
-  image.innerHTML = (icon as SVGElement).outerHTML + (text as HTMLSpanElement).outerHTML
+  image.innerHTML = icon.outerHTML + text.outerHTML
 
   return image
 }
 
 const withFileDragImage = (event: DragEvent) => {
-  const image = buildDragImage(event.currentTarget as HTMLElement)
+  const target = event.currentTarget
+
+  if (!(target instanceof HTMLElement)) return
+  const image = buildDragImage(target)
 
   if (!image) return
   document.body.appendChild(image)
@@ -25,11 +28,11 @@ const withFileDragImage = (event: DragEvent) => {
   setTimeout(() => document.body.removeChild(image), 0)
 }
 
-/** Drag data for a workspace file row, so it drops as a file reference. */
+/** Drag data for a workspace file row, so it drops as a file reference, or moves within the file tree. */
 export function startFileDrag(event: DragEvent, path: string) {
   event.dataTransfer?.setData("text/plain", `file:${path}`)
   event.dataTransfer?.setData("text/uri-list", pathToFileUrl(path))
 
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy"
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove"
   withFileDragImage(event)
 }

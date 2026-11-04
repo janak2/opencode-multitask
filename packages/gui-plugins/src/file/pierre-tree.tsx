@@ -1,5 +1,5 @@
 import "@pierre/trees/web-components"
-import { FileTree, type FileTreeDirectoryHandle, type FileTreeItemHandle } from "@pierre/trees"
+import { FileTree, type FileTreeDirectoryHandle, type FileTreeDropResult, type FileTreeItemHandle } from "@pierre/trees"
 import { getIcon } from "@opencode/ui/icons/catalog"
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -211,6 +211,7 @@ export default function PierreFileTree(props: {
   let tree: FileTree | undefined
   let syncingSelection = false
   let syncingExpansion = false
+  let dragging = false
   let appliedStatus = new Map<string, TreeGitStatus>()
   let renderedAllowed: AllowedTreeInput | undefined
   let renderedLabels: ReadonlyMap<string, string> | undefined
@@ -322,7 +323,14 @@ export default function PierreFileTree(props: {
       middleTruncate: false,
       stickyFolders: false,
       gitStatus: initialGitStatus.length > 0 ? initialGitStatus : undefined,
-      dragAndDrop: draggable() ? { canDrag: () => true, canDrop: () => false } : false,
+      dragAndDrop: draggable()
+        ? {
+            canDrag: () => true,
+            canDrop: () => isLive,
+            onDropComplete: (event) => void moveDropped(event),
+            onDropError: (error) => fail(new Error(error)),
+          }
+        : false,
       unsafeCSS: TREE_UNSAFE_CSS,
       renderRowDecoration: ({ row }) => {
         if (row.kind !== "directory") return null
@@ -554,6 +562,43 @@ export default function PierreFileTree(props: {
 
   const refresh = (dirs: string[]) => Promise.all([...new Set(dirs)].map((dir) => source().sync(dir, { force: true })))
 
+  // The tree's store throws on adding a path it has or removing one it lacks, so known paths follow its moves.
+  const remap = (from: string, to: string) => {
+    for (const known of [...knownPaths]) {
+      if (known !== from && !(from.endsWith("/") && known.startsWith(from))) continue
+      knownPaths.delete(known)
+      knownPaths.add(to + known.slice(from.length))
+    }
+  }
+
+  // The tree has already moved the rows; a move the server refuses is moved back.
+  const moveDropped = (event: FileTreeDropResult) => {
+    const dir = event.target.kind === "root" ? "" : (event.target.directoryPath ?? "")
+
+    const moves = event.draggedPaths.map((from) => ({
+      from,
+      to: `${dir}${name(clean(from))}${from.endsWith("/") ? "/" : ""}`,
+    }))
+
+    const client = props.session.server.client
+    moves.forEach((move) => remap(move.from, move.to))
+
+    return Promise.all(
+      moves.map((move) =>
+        client.experimental.file.move({ location: location(), from: clean(move.from), to: clean(move.to) }).then(
+          () => {
+            if (source().state(clean(move.from))?.expanded) source().expand(clean(move.to))
+          },
+          (error: Error) => {
+            remap(move.to, move.from)
+            tree?.move(move.to, move.from)
+            fail(error)
+          },
+        ),
+      ),
+    ).then(() => refresh([clean(dir), ...moves.map((move) => parent(clean(move.from)))]))
+  }
+
   const create = async (type: FileNode["type"]) => {
     const dir = menu.type === "directory" ? (menu.path ?? "") : parent(menu.path ?? "")
 
@@ -736,10 +781,23 @@ export default function PierreFileTree(props: {
           const button = findTreeItemButton(event)
 
           if (!button?.dataset.itemPath) return
+          dragging = true
           startFileDrag(
             event,
             props.root ? toFileNode(button.dataset.itemPath).absolute : originalPath(button.dataset.itemPath),
           )
+        }}
+        onDragEnd={() => {
+          dragging = false
+        }}
+        onDragOver={(event) => {
+          if (dragging) event.stopPropagation()
+        }}
+        onDrop={(event) => {
+          if (!dragging) return
+          event.stopPropagation()
+          // The composer clears its drop hint when a drag leaves the window, and this drop never reaches it.
+          document.dispatchEvent(new DragEvent("dragleave"))
         }}
       />
     </OpenInAppContextMenuV2>
