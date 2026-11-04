@@ -665,6 +665,68 @@ export default function PierreFileTree(props: {
       .then(() => refresh([parent(path)]), fail)
   }
 
+  const droppable = () => live() && draggable()
+  const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") ?? false
+
+  // Writing replaces a file silently, so each name the folder already lists asks first.
+  const upload = async (dir: string, files: File[]) => {
+    await source().sync(dir, { force: true })
+
+    if (ctx.signal.aborted) return
+
+    const names = new Set(
+      source()
+        .list(dir)
+        .map((node) => node.name),
+    )
+
+    const client = props.session.server.client
+
+    for (const file of files) {
+      const replace =
+        names.has(file.name) &&
+        (await ctx.dialogs.confirm({
+          title: ctx.t("tree.replace.title", { name: file.name }),
+          confirm: ctx.t("tree.replace"),
+          danger: true,
+        }))
+
+      if (ctx.signal.aborted) return
+
+      if (names.has(file.name) && !replace) continue
+      await file
+        .arrayBuffer()
+        .then((buffer) =>
+          client.experimental.file.write({
+            location: location(),
+            path: join(dir, file.name),
+            payload: new Uint8Array(buffer),
+          }),
+        )
+        .catch(fail)
+    }
+
+    if (dir) source().expand(dir)
+    await refresh([dir])
+  }
+
+  const dropFiles = (event: DragEvent) => {
+    const button = findTreeItemButton(event)
+    const raw = button?.dataset.itemPath
+    const path = raw ? clean(originalPath(raw)) : ""
+    const dir = button?.dataset.itemType === "folder" ? path : parent(path)
+
+    // The items are readable only while the drop event runs.
+    const dropped = Array.from(event.dataTransfer?.items ?? [])
+      .filter((item) => item.kind === "file")
+      .map((item) => ({ file: item.getAsFile(), directory: item.webkitGetAsEntry()?.isDirectory ?? false }))
+
+    if (dropped.some((item) => item.directory)) showToast({ variant: "default", title: ctx.t("tree.upload.folders") })
+    const files = dropped.flatMap((item) => (item.file && !item.directory ? [item.file] : []))
+
+    if (files.length > 0) void upload(dir, files)
+  }
+
   const items = {
     opens(event: MouseEvent) {
       const button = findTreeItemButton(event)
@@ -791,13 +853,25 @@ export default function PierreFileTree(props: {
           dragging = false
         }}
         onDragOver={(event) => {
-          if (dragging) event.stopPropagation()
+          if (!dragging && (!droppable() || !hasFiles(event))) return
+          event.stopPropagation()
+
+          if (dragging) return
+          event.preventDefault()
+
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"
         }}
         onDrop={(event) => {
-          if (!dragging) return
+          const files = !dragging && droppable() && hasFiles(event)
+
+          if (!dragging && !files) return
           event.stopPropagation()
           // The composer clears its drop hint when a drag leaves the window, and this drop never reaches it.
           document.dispatchEvent(new DragEvent("dragleave"))
+
+          if (!files) return
+          event.preventDefault()
+          dropFiles(event)
         }}
       />
     </OpenInAppContextMenuV2>
