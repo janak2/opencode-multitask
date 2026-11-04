@@ -49,6 +49,9 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
           const project = await serverCtx().sdk.api.project.update({ projectID: props.project.id, ...patch })
           serverCtx().sync.project.update(project)
 
+          // A server without project folders accepts the request but drops them; show what it kept.
+          if (patch.folders) setStore("folders", [...(project.folders ?? [])])
+
           return
         }
 
