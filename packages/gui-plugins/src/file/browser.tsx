@@ -2,6 +2,8 @@ import { createMemo, createUniqueId, For, onCleanup, Show, type Accessor } from 
 import { createStore } from "solid-js/store"
 import { createQuery, keepPreviousData } from "@tanstack/solid-query"
 import { Icon } from "@opencode/ui/icon"
+import { Select } from "@opencode/ui/select"
+import { showToast } from "@opencode/ui/toast"
 import { SessionFilePanelV2, SessionFilePanelV2Empty } from "@opencode/session-ui/v2/session-file-panel-v2"
 import { SessionReviewV2Sidebar, SessionReviewV2SidebarToggle } from "@opencode/session-ui/v2/session-review-v2"
 import { getFilename } from "@opencode/util/path"
@@ -17,6 +19,7 @@ import {
   type SessionScreen,
 } from "@opencode/plugin/gui"
 import { current, useShared } from "./context"
+import { createFolderTree } from "./folder-tree"
 import SessionFileList, { applyFileListKeyDown } from "./list"
 import { fileTabPath, isFileTab } from "./path"
 import PierreFileTree from "./pierre-tree"
@@ -85,6 +88,15 @@ export function SessionFileBrowserTab(props: {
     return project.name || getFilename(project.worktree) || project.worktree
   })
 
+  const folders = createMemo(() => props.session.project?.folders ?? [])
+  const roots = createMemo(() => [props.session.directory, ...folders()])
+
+  const folder = () => {
+    const value = shared.folder.get(props.session.key)
+
+    return value && folders().includes(value) ? value : undefined
+  }
+
   const optionID = (path: string) => `${resultsID}-option-${files().indexOf(path)}`
 
   const onFilterKeyDown = (event: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
@@ -123,7 +135,21 @@ export function SessionFileBrowserTab(props: {
         <SessionReviewV2Sidebar
           open={sidebarOpened()}
           transition={props.state.transition()}
-          title={<span class="truncate font-[530]">{title()}</span>}
+          title={
+            <Show when={folders().length > 0} fallback={<span class="truncate font-[530]">{title()}</span>}>
+              <Select
+                options={roots()}
+                current={folder() ?? props.session.directory}
+                label={(path) => (path === props.session.directory ? title() : getFilename(path) || path)}
+                placement="bottom-start"
+                gutter={6}
+                aria-label={ctx.t("tree.folder")}
+                onSelect={(path) =>
+                  path && shared.folder.set(props.session.key, path === props.session.directory ? undefined : path)
+                }
+              />
+            </Show>
+          }
           filter={filter()}
           onFilterChange={setFilter}
           onFilterKeyDown={onFilterKeyDown}
@@ -138,15 +164,43 @@ export function SessionFileBrowserTab(props: {
           <Show
             when={query()}
             fallback={
-              <PierreFileTree
-                session={props.session}
-                screen={props.screen}
-                active={props.active}
-                kinds={props.kinds}
-                draggable={!props.mobile}
-                onFileClick={(node) => props.onSelect(node.path)}
-                onFileDoubleClick={(node) => props.onSelectPermanent(node.path)}
-              />
+              <Show
+                when={folder()}
+                keyed
+                fallback={
+                  <PierreFileTree
+                    session={props.session}
+                    screen={props.screen}
+                    active={props.active}
+                    kinds={props.kinds}
+                    draggable={!props.mobile}
+                    onFileClick={(node) => props.onSelect(node.path)}
+                    onFileDoubleClick={(node) => props.onSelectPermanent(node.path)}
+                  />
+                }
+              >
+                {(root) => {
+                  const tree = createFolderTree({
+                    client: () => props.session.server.client,
+                    folder: root,
+                    onError: (message) =>
+                      showToast({ variant: "error", title: ctx.t("common.requestFailed"), description: message }),
+                  })
+
+                  return (
+                    <PierreFileTree
+                      session={props.session}
+                      screen={props.screen}
+                      root={root}
+                      tree={tree}
+                      active={props.active?.startsWith(`${root}/`) ? props.active.slice(root.length + 1) : undefined}
+                      draggable={!props.mobile}
+                      onFileClick={(node) => props.onSelect(node.absolute)}
+                      onFileDoubleClick={(node) => props.onSelectPermanent(node.absolute)}
+                    />
+                  )
+                }}
+              </Show>
             }
           >
             <Show

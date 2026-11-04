@@ -3,7 +3,14 @@ import { FileTree, type FileTreeDirectoryHandle, type FileTreeItemHandle } from 
 import { getIcon } from "@opencode/ui/icons/catalog"
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { ChangeKind } from "@opencode/plugin/gui/review"
-import { createKeyed, usePlugin, type FileNode, type MountedSession, type SessionScreen } from "@opencode/plugin/gui"
+import {
+  createKeyed,
+  usePlugin,
+  type FileNode,
+  type Files,
+  type MountedSession,
+  type SessionScreen,
+} from "@opencode/plugin/gui"
 import { startFileDrag } from "./drag"
 import { OpenInAppContextMenuV2, useOpenInApp } from "./open-in-app"
 import { resolveOpenInAppPath } from "./path"
@@ -154,6 +161,10 @@ function findFileButtonPath(event: Event) {
 export default function PierreFileTree(props: {
   session: MountedSession
   screen: SessionScreen
+  /** The folder the tree lists; defaults to the workspace root. */
+  root?: string
+  /** The tree's directory listing; defaults to the workspace's. */
+  tree?: Files["tree"]
   active?: string
   allowed?: readonly string[]
   kinds?: ReadonlyMap<string, ChangeKind>
@@ -164,11 +175,13 @@ export default function PierreFileTree(props: {
 }) {
   const ctx = usePlugin()
   const file = props.screen.file
-  const openIn = ctx.desktop ? useOpenInApp({ session: props.session, path: () => file.root }) : undefined
+  const root = () => props.root ?? file.root
+  const source = () => props.tree ?? file.tree
+  const openIn = ctx.desktop ? useOpenInApp({ session: props.session, path: root }) : undefined
   const live = () => props.allowed === undefined
   const draggable = () => props.draggable ?? true
   const active = () => normalizeFileTreeV2Path(props.active ?? "")
-  const expanded = (path: string) => file.tree.state(path)?.expanded ?? false
+  const expanded = (path: string) => source().state(path)?.expanded ?? false
 
   const allowedPaths = createMemo(() => (live() ? undefined : (props.allowed ?? [])), undefined, {
     equals: (previous, next) =>
@@ -186,7 +199,7 @@ export default function PierreFileTree(props: {
   })
 
   const liveModel = createMemo(() =>
-    live() ? buildLiveTreeInput((path) => file.tree.list(path), expanded) : undefined,
+    live() ? buildLiveTreeInput((path) => source().list(path), expanded) : undefined,
   )
 
   const [ready, setReady] = createSignal(false)
@@ -201,7 +214,7 @@ export default function PierreFileTree(props: {
   let renderedLabels: ReadonlyMap<string, string> | undefined
   let renderedKinds: ReadonlyMap<string, ChangeKind> | undefined
   let renderedIgnored: ReadonlySet<string> | undefined
-  let renderedRoot = file.root
+  let renderedRoot = root()
   let widthHost: HTMLElement | undefined
   let widest = 0
 
@@ -240,8 +253,8 @@ export default function PierreFileTree(props: {
 
     for (const dir of model.directories) {
       const expand = model.untrackedDirs.has(dir)
-        ? file.tree.state(dir)?.expanded === true
-        : file.tree.state(dir)?.expanded !== false
+        ? source().state(dir)?.expanded === true
+        : source().state(dir)?.expanded !== false
 
       if (expand) continue
       const handle = tree.getItem(dir)
@@ -281,7 +294,7 @@ export default function PierreFileTree(props: {
     renderedLabels = props.labels
     renderedKinds = props.kinds
     renderedIgnored = initialLive?.ignoredPaths
-    renderedRoot = file.root
+    renderedRoot = root()
 
     tree = new FileTree({
       paths: initialPaths,
@@ -324,8 +337,8 @@ export default function PierreFileTree(props: {
         if (syncingExpansion) return
         const original = originalPath(change.path)
 
-        if (change.expanded) file.tree.expand(original, live() ? undefined : { list: false })
-        else file.tree.collapse(original)
+        if (change.expanded) source().expand(original, live() ? undefined : { list: false })
+        else source().collapse(original)
       },
       onSelectionChange: () => syncSelection(active()),
     })
@@ -364,11 +377,11 @@ export default function PierreFileTree(props: {
   createKeyed(
     () => {
       if (!live()) return
-      const root = file.tree.state("")
+      const state = source().state("")
 
-      return root?.loaded ? undefined : { root }
+      return state?.loaded ? undefined : { state }
     },
-    () => void file.tree.sync(""),
+    () => void source().sync(""),
   )
 
   // Replaces the tree paths when `allowed` changes after mount.
@@ -398,7 +411,7 @@ export default function PierreFileTree(props: {
 
   // Incrementally batches newly loaded or unlinked directory entries into the live tree.
   createKeyed(
-    () => (ready() && live() ? { root: file.root, model: liveModel()! } : undefined),
+    () => (ready() && live() ? { root: root(), model: liveModel()! } : undefined),
     (current) => {
       if (!tree) return
 
@@ -518,7 +531,7 @@ export default function PierreFileTree(props: {
     if (!rawPath) return
     const node = toFileNode(rawPath)
 
-    return resolveOpenInAppPath(file.root, node.absolute || node.path)
+    return resolveOpenInAppPath(root(), node.absolute || node.path)
   }
 
   return (
@@ -575,7 +588,11 @@ export default function PierreFileTree(props: {
           if (!draggable()) return
           const button = findTreeItemButton(event)
 
-          if (button?.dataset.itemPath) startFileDrag(event, originalPath(button.dataset.itemPath))
+          if (!button?.dataset.itemPath) return
+          startFileDrag(
+            event,
+            props.root ? toFileNode(button.dataset.itemPath).absolute : originalPath(button.dataset.itemPath),
+          )
         }}
       />
     </OpenInAppContextMenuV2>

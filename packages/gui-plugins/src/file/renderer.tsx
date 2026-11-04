@@ -81,6 +81,7 @@ const setup: Plugin.Setup<typeof File> = (ctx) => {
   const [request, setRequest] = createStore<{ app?: OpenApp }>({})
 
   const [filters, setFilters] = createStore<Record<string, { text: string; browsing: boolean } | undefined>>({})
+  const [folders, setFolders] = createStore<Record<string, string | undefined>>({})
 
   const revealListeners = new Map<string, Set<() => void>>()
   let clickController: AbortController | undefined
@@ -192,6 +193,21 @@ const setup: Plugin.Setup<typeof File> = (ctx) => {
       set: (session, value) => updateFilter(session, { text: value }),
       browsing: (session) => filters[session]?.browsing ?? false,
       setBrowsing: (session, value) => updateFilter(session, { browsing: value }),
+    },
+    folder: {
+      get: (session) => folders[session],
+      set: (session, value) =>
+        setFolders(
+          produce((draft) => {
+            delete draft[session]
+
+            if (!value) return
+            draft[session] = value
+            const keys = Object.keys(draft)
+
+            keys.slice(0, Math.max(0, keys.length - FILTER_SESSIONS)).forEach((item) => delete draft[item])
+          }),
+        ),
     },
     installed: new Map(),
     app: preference && {

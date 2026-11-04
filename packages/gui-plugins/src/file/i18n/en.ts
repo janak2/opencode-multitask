@@ -1,5 +1,6 @@
 export default {
   "tree.all": "All files",
+  "tree.folder": "Project folder",
   "tab.notFound": "File not found: {{name}}",
   "mobile.title": "Files",
   "mobile.openTabs": "Open files",

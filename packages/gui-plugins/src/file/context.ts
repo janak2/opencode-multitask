@@ -23,6 +23,11 @@ export interface FileShared {
     browsing(session: string): boolean
     setBrowsing(session: string, value: boolean): void
   }
+  /** The project folder each session's file tree lists; undefined for the session's own directory. */
+  readonly folder: {
+    get(session: string): string | undefined
+    set(session: string, value: string | undefined): void
+  }
   /** Open-in-app availability checks, one per app for the window's lifetime. */
   readonly installed: Map<string, Promise<boolean>>
   /** The open-in-app choice. Desktop only. */
