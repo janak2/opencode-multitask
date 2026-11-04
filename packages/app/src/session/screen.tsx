@@ -46,6 +46,7 @@ import { SessionIdentityHeader, SessionLocation } from "./session-identity-heade
 import { SessionHeaderDrag, windowDragEnabled } from "./header/drag-area"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useServer } from "@/runtime/server/current"
+import { useTabs } from "@/shell/tabs/tabs"
 import { reviewGlyphFill, SessionReviewToggle } from "./header/session-header-actions"
 import { createTimelineCache } from "./timeline/cache"
 import { createPanelMotion, holdLandingWidth, panelOpacity, setPanelResizing } from "@/shell/panel-motion"
@@ -80,9 +81,33 @@ function SessionScreenContent(props: {
   const attachment = usePluginAttachment()
   const settings = useSettings()
   const server = useServer()
+  const tabs = useTabs()
   const isDesktop = session.isDesktop
   const bottomMobileTabs = () => settings.general.mobileTitlebarPosition() === "bottom"
   const sidebar = createPanelSidebar()
+
+  // A session with no messages has nothing to show once its side panel closes, so closing it returns to a draft.
+  const toggleSide = () => {
+    const side = session.layout.view().side
+    const id = session.identity.sessionID()
+    const info = session.data.info()
+
+    if (
+      side.opened() &&
+      id &&
+      info &&
+      timeline.resource.state === "ready" &&
+      timeline.resource() === id &&
+      session.history.messages().length === 0 &&
+      session.shared.data.session.pending.list(id).length === 0 &&
+      !session.data.working()
+    )
+      return tabs.demoteSession(
+        { server: server.key, sessionId: id },
+        { server: server.key, directory: info.location.directory },
+      )
+    side.toggle()
+  }
 
   const region = createRegion({
     region: "side",
@@ -91,12 +116,12 @@ function SessionScreenContent(props: {
     tabs: session.layout.tabs,
     closed: attachment.closed,
     open: (key) => attachment.openTab(key, props.view()),
-    side: () => session.layout.view().side,
+    side: () => ({ opened: session.layout.view().side.opened, toggle: toggleSide }),
     // Closing the last tab closes the side region, which opens with a new tab next time. The user's own hand closed
     // it, so it goes at once.
     onEmptied: () => {
       if (!session.layout.view().side.opened()) return
-      session.layout.view().side.toggle()
+      toggleSide()
       sideMotion.sync(false)
     },
     settled: (run) => sideMotion.whenSettled(run),

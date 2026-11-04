@@ -316,6 +316,26 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         memory.remove(`draft:${draftID}`)
         removeDraftPersisted(draftID)
       },
+      /** Replaces a session tab with a new draft in its place: the reverse of promoteDraft. */
+      demoteSession(session: Omit<SessionTab, "type">, draft: Omit<DraftTab, "type" | "draftID">) {
+        const key = tabKey({ type: "session", ...session })
+        const index = store.findIndex((tab) => tabKey(tab) === key)
+
+        if (index === -1) return
+        const next = { type: "draft" as const, draftID: uuid(), ...draft }
+        memory.ensure(tabKey(next), "prompt", () => createDraftComposerState(next.draftID))
+        void startTransition(() => {
+          setStore(
+            produce((tabs) => {
+              tabs[index] = next
+            }),
+          )
+          navigateTab(next)
+        })
+        memory.remove(key)
+        removeInfo(key)
+        removeRegions(key)
+      },
       pendingSession(server: ServerConnection.Key, sessionID: string): PendingSession | undefined {
         return pending[tabKey({ type: "session", server, sessionId: sessionID })]
       },
