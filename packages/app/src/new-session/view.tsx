@@ -1,7 +1,6 @@
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
-import { IconButton } from "@opencode/ui/icon-button"
 import { Slash } from "@opencode/ui/slash"
 import { Keybind } from "@opencode/ui/keybind"
 import { useCommand } from "@/shell/commands/command"
@@ -34,6 +33,7 @@ import { NEW_SESSION_CONTENT_WIDTH } from "@/new-session/layout"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import { useSettings } from "@/settings/model"
+import { SessionHeaderActions } from "@/session/header/session-header-actions"
 import type { NewSessionWorkspaceController } from "./workspace/controller"
 import { NewSessionBranch } from "./workspace/selector"
 import { NewSessionBrickBreaker } from "./brick-breaker"
@@ -75,6 +75,8 @@ export function NewSessionView(props: {
   )
 
   const settings = useSettings()
+  const language = useLanguage()
+  const command = useCommand()
 
   const [wordmark, setWordmark] = createStore<WordmarkState>({ mode: "flat", game: false })
 
@@ -129,7 +131,6 @@ export function NewSessionView(props: {
                       onboarding={onboardingReady() && !onboarding.used && props.workspace.bar.visible()}
                       onClick={() => location()}
                       onWorktree={project().id && project().vcs === "git" ? () => location(project()) : undefined}
-                      onOpenWorkspace={props.onOpenWorkspace}
                     />
                   )}
                 </Show>
@@ -166,6 +167,17 @@ export function NewSessionView(props: {
           )}
         </Show>
         <NewSessionTips selection={props.composer.model.selection} onDone={props.composer.restoreFocus} />
+      </div>
+      <div class="absolute end-[var(--session-header-inset-end,12px)] top-0 z-30 h-12 flex items-center">
+        <SessionHeaderActions
+          state={{
+            reviewLabel: language.t("session.new.openWorkspace"),
+            reviewKeybind: command.keybindParts("review.toggle"),
+            reviewVisible: true,
+            reviewOpened: false,
+            onReviewToggle: props.onOpenWorkspace,
+          }}
+        />
       </div>
     </div>
   )
@@ -292,7 +304,6 @@ function NewSessionLocation(props: {
   onClick: () => void
   /** Opens the project's worktree step; without it the project has no worktrees to choose. */
   onWorktree?: () => void
-  onOpenWorkspace: () => void
 }) {
   const language = useLanguage()
   const command = useCommand()
@@ -466,15 +477,6 @@ function NewSessionLocation(props: {
           </div>
         )}
       </Show>
-      <Tooltip placement="top" openDelay={800} value={language.t("session.new.openWorkspace")} class="ms-auto flex">
-        <IconButton
-          icon={<Icon name="layout-right" size="small" />}
-          variant="ghost-muted"
-          data-action="prompt-open-workspace"
-          aria-label={language.t("session.new.openWorkspace")}
-          onClick={props.onOpenWorkspace}
-        />
-      </Tooltip>
     </div>
   )
 }

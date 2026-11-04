@@ -14,6 +14,7 @@ export function useNewSessionCommands(input: {
     enabled: () => boolean
     cycle: () => void
   }
+  openWorkspace: () => void
 }) {
   const command = useCommand()
   const dialog = useDialog()
@@ -46,6 +47,13 @@ export function useNewSessionCommands(input: {
       keybind: "mod+alt+l",
       disabled: !input.workspace.enabled(),
       onSelect: input.workspace.cycle,
+    },
+    {
+      id: "review.toggle",
+      title: language.t("session.new.openWorkspace"),
+      category: language.t("command.category.view"),
+      keybind: "mod+shift+r",
+      onSelect: input.openWorkspace,
     },
   ])
   // Shadows the titlebar's command of the same key while the draft is mounted, so it searches projects in place.

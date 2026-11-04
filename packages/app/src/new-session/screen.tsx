@@ -99,6 +99,7 @@ export default function NewSessionPage(props: { draftId: string }) {
       enabled: workspace.bar.visible,
       cycle: workspace.selection.cycle,
     },
+    openWorkspace,
   })
   // Focus once the draft loads. restoreFocus reads the stored cursor, so tracking it here would reapply
   // a stale cursor a frame after every key-up and yank the caret from a key pressed in that frame.
