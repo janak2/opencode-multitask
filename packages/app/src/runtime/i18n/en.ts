@@ -687,6 +687,7 @@ export const dict = {
   "session.new.workspace.fromBranch": "from {{branch}}",
   "session.new.workspace.branch.search.placeholder": "Search branches",
   "session.new.git.none": "No Git",
+  "session.new.openWorkspace": "Open files and terminal without a chat",
 
   "session.search.placeholder": "Find...",
   "session.search.noResults": "No matches",

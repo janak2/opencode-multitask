@@ -1,6 +1,7 @@
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
+import { IconButton } from "@opencode/ui/icon-button"
 import { Slash } from "@opencode/ui/slash"
 import { Keybind } from "@opencode/ui/keybind"
 import { useCommand } from "@/shell/commands/command"
@@ -65,6 +66,7 @@ export function NewSessionView(props: {
   project: PromptProjectController
   workspace: NewSessionWorkspaceController
   location: ReturnType<typeof useNewSessionLocationDialog>
+  onOpenWorkspace: () => void
 }) {
   const [onboarding, setOnboarding, , onboardingReady] = persisted(
     Persist.global("workspace-onboarding"),
@@ -127,6 +129,7 @@ export function NewSessionView(props: {
                       onboarding={onboardingReady() && !onboarding.used && props.workspace.bar.visible()}
                       onClick={() => location()}
                       onWorktree={project().id && project().vcs === "git" ? () => location(project()) : undefined}
+                      onOpenWorkspace={props.onOpenWorkspace}
                     />
                   )}
                 </Show>
@@ -289,6 +292,7 @@ function NewSessionLocation(props: {
   onClick: () => void
   /** Opens the project's worktree step; without it the project has no worktrees to choose. */
   onWorktree?: () => void
+  onOpenWorkspace: () => void
 }) {
   const language = useLanguage()
   const command = useCommand()
@@ -462,6 +466,15 @@ function NewSessionLocation(props: {
           </div>
         )}
       </Show>
+      <Tooltip placement="top" openDelay={800} value={language.t("session.new.openWorkspace")} class="ms-auto flex">
+        <IconButton
+          icon={<Icon name="layout-right" size="small" />}
+          variant="ghost-muted"
+          data-action="prompt-open-workspace"
+          aria-label={language.t("session.new.openWorkspace")}
+          onClick={props.onOpenWorkspace}
+        />
+      </Tooltip>
     </div>
   )
 }

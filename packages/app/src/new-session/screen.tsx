@@ -3,7 +3,11 @@ import { useNewSessionLocationDialog } from "@/new-session/location/dialog"
 import { useTabs, type DraftTab } from "@/shell/tabs/tabs"
 import { useLayout } from "@/shell/state/layout"
 import { useSearchParams } from "@solidjs/router"
-import { createEffect, createMemo, createResource, on, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, on, startTransition, untrack } from "solid-js"
+import { useData, useServer } from "@/runtime/server/current"
+import { useWorkspaceLocation } from "@/workspaces/location"
+import { useLanguage } from "@/runtime/i18n/language"
+import { showToast } from "@/shell/notifications/toast"
 import { createComposerModel } from "@/composer/model"
 import { useComposerCommands } from "@/composer/commands"
 import { createNewSessionComposerAdapter } from "./composer-adapter"
@@ -48,6 +52,42 @@ export default function NewSessionPage(props: { draftId: string }) {
 
   const project = createPromptProjectController({ controls: composer.project })
   const location = useNewSessionLocationDialog({ project, workspace, onDone: model.restoreFocus })
+  const data = useData()
+  const server = useServer()
+  const current = useWorkspaceLocation()
+  const language = useLanguage()
+
+  const openWorkspace = async () => {
+    const draftID = props.draftId
+    const directory = current().directory
+    const worktree = workspace.selection.value()
+
+    const created = data.session.create({
+      location: {
+        directory:
+          worktree === "main" || worktree === "create"
+            ? (data.location.info({ directory })?.project.canonical ?? directory)
+            : worktree,
+      },
+    })
+
+    const ok = await created.request.then(
+      () => true,
+      () => false,
+    )
+
+    if (!ok) {
+      showToast({ title: language.t("prompt.toast.sessionCreateFailed.title") })
+
+      return
+    }
+
+    const session = { server: server.key, sessionId: created.id }
+    void startTransition(() => {
+      tabs.promoteDraft(draftID, session)
+      tabs.setRegion({ type: "session", ...session }, "side", true)
+    })
+  }
 
   useNewSessionCommands({
     restoreFocus: model.restoreFocus,
@@ -92,7 +132,13 @@ export default function NewSessionPage(props: { draftId: string }) {
     <div class="relative size-full overflow-hidden flex flex-col">
       {suspendUntilPromptReady()}
       <div class="flex-1 min-h-0 flex flex-col gap-2 px-[var(--shell-inline-inset,8px)] pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]">
-        <NewSessionView composer={model} project={project} workspace={workspace} location={location} />
+        <NewSessionView
+          composer={model}
+          project={project}
+          workspace={workspace}
+          location={location}
+          onOpenWorkspace={openWorkspace}
+        />
       </div>
     </div>
   )
