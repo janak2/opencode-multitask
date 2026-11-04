@@ -18,23 +18,26 @@ export function createFolderTree(input: {
 }): Files["tree"] {
   const [store, setStore] = createStore<{ dir: Record<string, DirectoryState> }>({ dir: { "": { expanded: true } } })
   const inflight = new Map<string, Promise<void>>()
+  // The server lists directories with a trailing separator; "src" and "src/" are one directory.
+  const key = (path: string) => path.replace(/[\\/]+$/, "")
 
-  const ensure = (path: string) => {
-    if (!store.dir[path]) setStore("dir", path, { expanded: false })
+  const ensure = (dir: string) => {
+    if (!store.dir[dir]) setStore("dir", dir, { expanded: false })
   }
 
   const sync = (path: string, options?: { readonly force?: boolean }) => {
-    ensure(path)
+    const dir = key(path)
+    ensure(dir)
 
-    if (!options?.force && store.dir[path]?.loaded) return Promise.resolve()
-    const pending = inflight.get(path)
+    if (!options?.force && store.dir[dir]?.loaded) return Promise.resolve()
+    const pending = inflight.get(dir)
 
     if (pending) return pending
-    setStore("dir", path, { loading: true, error: undefined })
+    setStore("dir", dir, { loading: true, error: undefined })
 
     const promise = input
       .client()
-      .file.list({ location: { directory: input.folder }, path: path || undefined })
+      .file.list({ location: { directory: input.folder }, path: dir || undefined })
       .then((result) => {
         const children = result.data.map(
           (entry): FileNode => ({
@@ -48,7 +51,7 @@ export function createFolderTree(input: {
 
         setStore(
           "dir",
-          path,
+          dir,
           produce((draft) => {
             draft.loaded = true
             draft.loading = false
@@ -57,29 +60,31 @@ export function createFolderTree(input: {
         )
       })
       .catch((error: Error) => {
-        setStore("dir", path, { loading: false, error: error.message })
+        setStore("dir", dir, { loading: false, error: error.message })
         input.onError(error.message)
       })
-      .finally(() => inflight.delete(path))
+      .finally(() => inflight.delete(dir))
 
-    inflight.set(path, promise)
+    inflight.set(dir, promise)
 
     return promise
   }
 
   return {
-    list: (path) => store.dir[path]?.children ?? [],
-    state: (path) => store.dir[path],
+    list: (path) => store.dir[key(path)]?.children ?? [],
+    state: (path) => store.dir[key(path)],
     sync,
     expand(path, options) {
-      ensure(path)
-      setStore("dir", path, "expanded", true)
+      const dir = key(path)
+      ensure(dir)
+      setStore("dir", dir, "expanded", true)
 
-      if (options?.list !== false) void sync(path)
+      if (options?.list !== false) void sync(dir)
     },
     collapse(path) {
-      ensure(path)
-      setStore("dir", path, "expanded", false)
+      const dir = key(path)
+      ensure(dir)
+      setStore("dir", dir, "expanded", false)
     },
   }
 }

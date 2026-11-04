@@ -358,13 +358,12 @@ export function OpenInAppContextMenuV2(
   props: ParentProps<{
     state?: OpenInAppState
     resolvePath: (event: MouseEvent) => string | undefined
+    /** Items above "Open in", shown wherever "Open in" is available or not; `opens` is false for a click without them. */
+    items?: { opens: (event: MouseEvent) => boolean; render: (close: () => void) => JSX.Element }
     /** Keeps the trigger within its container, for content that clips its own rows rather than scrolling sideways. */
     fit?: boolean
   }>,
 ) {
-  const state = props.state
-
-  if (!state) return props.children
   const [open, setOpen] = createSignal(false)
   const [path, setPath] = createSignal("")
   let hoveredRow: HTMLElement | undefined
@@ -382,8 +381,10 @@ export function OpenInAppContextMenuV2(
     clearHover()
   }
 
+  const canOpen = () => props.state?.canOpen() ?? false
+
   return (
-    <Show when={state.canOpen()} fallback={props.children}>
+    <Show when={canOpen() || props.items} fallback={props.children}>
       <Menu.Context
         modal={false}
         onOpenChange={(next) => {
@@ -402,9 +403,10 @@ export function OpenInAppContextMenuV2(
             capture: true,
             handleEvent(event: MouseEvent) {
               clearHover()
-              const next = props.resolvePath(event)
+              const next = canOpen() ? props.resolvePath(event) : undefined
+              const items = props.items?.opens(event) ?? false
 
-              if (!next) {
+              if (!next && !items) {
                 closeMenu()
                 event.preventDefault()
                 event.stopPropagation()
@@ -423,7 +425,7 @@ export function OpenInAppContextMenuV2(
                 }
               }
 
-              setPath(next)
+              setPath(next ?? "")
             },
           }}
         >
@@ -431,7 +433,17 @@ export function OpenInAppContextMenuV2(
         </Menu.Context.Trigger>
         <Menu.Context.Portal>
           <Menu.Context.Content class="open-in-app-v2-menu">
-            <OpenInAppMenuItemsV2 state={state} path={path} reveal selection={false} close={closeMenu} />
+            {props.items?.render(closeMenu)}
+            <Show when={path() ? props.state : undefined}>
+              {(state) => (
+                <>
+                  <Show when={props.items}>
+                    <Menu.Separator />
+                  </Show>
+                  <OpenInAppMenuItemsV2 state={state()} path={path} reveal selection={false} close={closeMenu} />
+                </>
+              )}
+            </Show>
           </Menu.Context.Content>
         </Menu.Context.Portal>
       </Menu.Context>

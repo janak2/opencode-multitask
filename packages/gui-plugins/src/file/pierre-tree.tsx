@@ -1,7 +1,11 @@
 import "@pierre/trees/web-components"
 import { FileTree, type FileTreeDirectoryHandle, type FileTreeItemHandle } from "@pierre/trees"
 import { getIcon } from "@opencode/ui/icons/catalog"
-import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createStore } from "solid-js/store"
+import { Icon } from "@opencode/ui/icon"
+import { Menu } from "@opencode/ui/menu"
+import { showToast } from "@opencode/ui/toast"
 import type { ChangeKind } from "@opencode/plugin/gui/review"
 import {
   createKeyed,
@@ -198,9 +202,7 @@ export default function PierreFileTree(props: {
     return paths ? buildAllowedTreeInput(paths) : undefined
   })
 
-  const liveModel = createMemo(() =>
-    live() ? buildLiveTreeInput((path) => source().list(path), expanded) : undefined,
-  )
+  const liveModel = createMemo(() => (live() ? buildLiveTreeInput((path) => source().list(path), expanded) : undefined))
 
   const [ready, setReady] = createSignal(false)
   const knownPaths = new Set<string>()
@@ -306,10 +308,7 @@ export default function PierreFileTree(props: {
         ? (a, b) => {
             const map = liveModel()?.orderByPath
 
-            return (
-              (map?.get(normalizeFileTreeV2Path(a.path)) ?? 0) -
-              (map?.get(normalizeFileTreeV2Path(b.path)) ?? 0)
-            )
+            return (map?.get(normalizeFileTreeV2Path(a.path)) ?? 0) - (map?.get(normalizeFileTreeV2Path(b.path)) ?? 0)
           }
         : "default",
       icons: {
@@ -406,7 +405,10 @@ export default function PierreFileTree(props: {
       renderedLabels = current.labels
       tree.render({ containerWrapper: wrapper })
     },
-    { equals: (previous, next) => previous !== undefined && next !== undefined && sameStringMap(previous.labels, next.labels) },
+    {
+      equals: (previous, next) =>
+        previous !== undefined && next !== undefined && sameStringMap(previous.labels, next.labels),
+    },
   )
 
   // Incrementally batches newly loaded or unlinked directory entries into the live tree.
@@ -434,6 +436,11 @@ export default function PierreFileTree(props: {
         if (parent === "" || expandedSet.has(parent)) {
           ops.push({ type: "remove", path: existing, recursive: existing.endsWith("/") })
           knownPaths.delete(existing)
+
+          // A recursive remove drops the rows below it too.
+          if (existing.endsWith("/")) {
+            for (const known of knownPaths) if (known.startsWith(existing)) knownPaths.delete(known)
+          }
         }
       }
 
@@ -534,8 +541,148 @@ export default function PierreFileTree(props: {
     return resolveOpenInAppPath(root(), node.absolute || node.path)
   }
 
+  // The right-clicked row, relative to the root without a trailing separator; no path for empty space.
+  const [menu, setMenu] = createStore<{ path?: string; type?: FileNode["type"] }>({})
+  const clean = (path: string) => path.replace(/[\\/]+$/, "")
+  const name = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1)
+  const parent = (path: string) => path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"), 0))
+  const join = (dir: string, entry: string) => (dir ? `${dir}/${entry}` : entry)
+  const location = () => ({ directory: root() })
+
+  const fail = (error: Error) =>
+    showToast({ variant: "error", title: ctx.t("common.requestFailed"), description: error.message })
+
+  const refresh = (dirs: string[]) => Promise.all([...new Set(dirs)].map((dir) => source().sync(dir, { force: true })))
+
+  const create = async (type: FileNode["type"]) => {
+    const dir = menu.type === "directory" ? (menu.path ?? "") : parent(menu.path ?? "")
+
+    const entry = await ctx.dialogs.prompt({
+      title: ctx.t(type === "directory" ? "tree.newFolder" : "tree.newFile"),
+      submit: ctx.t("tree.create"),
+    })
+
+    if (!entry || ctx.signal.aborted) return
+    const path = join(dir, entry)
+    const client = props.session.server.client
+
+    // Writing replaces a file silently, so a new file first checks the folder's fresh listing.
+    const request =
+      type === "directory"
+        ? client.experimental.file.mkdir({ location: location(), path })
+        : source()
+            .sync(dir, { force: true })
+            .then(() => {
+              if (
+                source()
+                  .list(dir)
+                  .some((node) => node.name === entry)
+              )
+                throw new Error(ctx.t("tree.exists", { name: entry }))
+
+              return client.experimental.file.write({ location: location(), path, payload: new Uint8Array() })
+            })
+
+    await request.then(() => {
+      if (dir) source().expand(dir)
+
+      return refresh([dir])
+    }, fail)
+  }
+
+  const rename = async (path: string) => {
+    const entry = await ctx.dialogs.prompt({
+      title: ctx.t("tree.rename"),
+      value: name(path),
+      submit: ctx.t("tree.rename"),
+    })
+
+    if (!entry || entry === name(path) || ctx.signal.aborted) return
+    const to = join(parent(path), entry)
+
+    await props.session.server.client.experimental.file
+      .move({ location: location(), from: path, to })
+      .then(() => refresh([parent(path), parent(to)]), fail)
+  }
+
+  const remove = async (path: string) => {
+    const confirmed = await ctx.dialogs.confirm({
+      title: ctx.t("tree.delete.title", { name: name(path) }),
+      description: ctx.t("tree.delete.description"),
+      confirm: ctx.t("tree.delete"),
+      danger: true,
+    })
+
+    if (!confirmed || ctx.signal.aborted) return
+
+    await props.session.server.client.experimental.file
+      .remove({ location: location(), path })
+      .then(() => refresh([parent(path)]), fail)
+  }
+
+  const items = {
+    opens(event: MouseEvent) {
+      const button = findTreeItemButton(event)
+      const raw = button?.dataset.itemPath
+
+      setMenu({
+        path: raw ? clean(originalPath(raw)) : undefined,
+        type: button?.dataset.itemType === "folder" ? "directory" : "file",
+      })
+
+      return true
+    },
+    render: (close: () => void) => (
+      <>
+        <Menu.Item
+          onSelect={() => {
+            close()
+            void create("file")
+          }}
+        >
+          <Icon name="plus" size="small" class="text-icon-weak" />
+          {ctx.t("tree.newFile")}
+        </Menu.Item>
+        <Menu.Item
+          onSelect={() => {
+            close()
+            void create("directory")
+          }}
+        >
+          <Icon name="folder-add-left" size="small" class="text-icon-weak" />
+          {ctx.t("tree.newFolder")}
+        </Menu.Item>
+        <Show when={menu.path}>
+          {(path) => (
+            <>
+              <Menu.Separator />
+              <Menu.Item
+                onSelect={() => {
+                  close()
+                  void rename(path())
+                }}
+              >
+                <Icon name="pencil-line" size="small" class="text-icon-weak" />
+                {ctx.t("tree.rename")}
+              </Menu.Item>
+              <Menu.Item
+                onSelect={() => {
+                  close()
+                  void remove(path())
+                }}
+              >
+                <Icon name="trash" size="small" class="text-icon-weak" />
+                {ctx.t("tree.delete")}
+              </Menu.Item>
+            </>
+          )}
+        </Show>
+      </>
+    ),
+  }
+
   return (
-    <OpenInAppContextMenuV2 state={openIn} resolvePath={resolveContextPath} fit>
+    <OpenInAppContextMenuV2 state={openIn} resolvePath={resolveContextPath} items={live() ? items : undefined} fit>
       <div
         ref={wrapper}
         data-component="file-tree-v2"
