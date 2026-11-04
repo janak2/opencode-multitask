@@ -20,7 +20,18 @@ export interface WriteInput {
   readonly data: Uint8Array
 }
 
+export interface MoveInput {
+  /** Relative to the location directory. */
+  readonly from: string
+  /** Relative to the location directory. */
+  readonly to: string
+}
+
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("FileSystem.NotFoundError", {
+  path: RelativePath,
+}) {}
+
+export class ExistsError extends Schema.TaggedError<ExistsError>()("FileSystem.ExistsError", {
   path: RelativePath,
 }) {}
 
@@ -101,6 +112,15 @@ export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<Entry[]>
   /** Writes a file at an absolute path or one relative to the location; not confined to it. */
   readonly write: (input: WriteInput) => Effect.Effect<Write>
+  /**
+   * Creates one directory inside the location; its parent must exist. Fails with `NotFoundError` outside the location
+   * or for the location itself, and with `ExistsError` when the path exists.
+   */
+  readonly mkdir: (input: ReadInput) => Effect.Effect<Write, NotFoundError | ExistsError>
+  /** Renames an entry inside the location, failing with `ExistsError` rather than replacing the destination. */
+  readonly move: (input: MoveInput) => Effect.Effect<Write, NotFoundError | ExistsError>
+  /** Removes a file, or a directory with its contents, inside the location; a symlink is removed, not its target. */
+  readonly remove: (input: ReadInput) => Effect.Effect<void, NotFoundError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/FileSystem") {}
@@ -144,6 +164,25 @@ const baseLayer = Layer.effect(
       )
       if (!FSUtil.contains(root, real)) return yield* Effect.fail(new NotFoundError({ path: input }))
       return { absolute, real, directory: location.directory }
+    })
+    // Mutations act on the entry itself, so only its parent is canonicalized: a symlink is renamed or removed, never
+    // followed.
+    const resolveEntry = Effect.fnUntraced(function* (input: string) {
+      const missing = new NotFoundError({ path: RelativePath.make(input) })
+      if (input.includes("\u0000")) return yield* missing
+      const absolute = path.resolve(location.directory, input)
+      if (absolute === path.resolve(location.directory) || !FSUtil.contains(location.directory, absolute))
+        return yield* missing
+      const parent = yield* fs.realPath(path.dirname(absolute)).pipe(
+        Effect.catchReason(
+          "PlatformError",
+          "NotFound",
+          () => Effect.fail(missing),
+          (_, error) => Effect.die(error),
+        ),
+      )
+      if (!FSUtil.contains(root, parent)) return yield* missing
+      return path.join(parent, path.basename(absolute))
     })
     return Service.of({
       find: search.find,
@@ -204,6 +243,44 @@ const baseLayer = Layer.effect(
         const target = path.resolve(location.directory, input.path)
         yield* fs.writeWithDirs(target, input.data).pipe(Effect.orDie)
         return Write.make({ path: AbsolutePath.make(target) })
+      }),
+      mkdir: Effect.fn("FileSystem.mkdir")(function* (input) {
+        const target = yield* resolveEntry(input.path)
+        yield* fs.makeDirectory(target).pipe(
+          Effect.catchReason(
+            "PlatformError",
+            "AlreadyExists",
+            () => Effect.fail(new ExistsError({ path: input.path })),
+            (_, error) => Effect.die(error),
+          ),
+        )
+        return Write.make({ path: AbsolutePath.make(target) })
+      }),
+      move: Effect.fn("FileSystem.move")(function* (input) {
+        const from = yield* resolveEntry(input.from)
+        const to = yield* resolveEntry(input.to)
+        if (yield* fs.exists(to).pipe(Effect.orDie))
+          return yield* new ExistsError({ path: RelativePath.make(input.to) })
+        yield* fs.rename(from, to).pipe(
+          Effect.catchReason(
+            "PlatformError",
+            "NotFound",
+            () => Effect.fail(new NotFoundError({ path: RelativePath.make(input.from) })),
+            (_, error) => Effect.die(error),
+          ),
+        )
+        return Write.make({ path: AbsolutePath.make(to) })
+      }),
+      remove: Effect.fn("FileSystem.remove")(function* (input) {
+        const target = yield* resolveEntry(input.path)
+        yield* fs.remove(target, { recursive: true }).pipe(
+          Effect.catchReason(
+            "PlatformError",
+            "NotFound",
+            () => Effect.fail(new NotFoundError({ path: input.path })),
+            (_, error) => Effect.die(error),
+          ),
+        )
       }),
     })
   }),

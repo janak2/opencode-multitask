@@ -2,7 +2,7 @@ import { FileSystem } from "@opencode/core/filesystem"
 import { FileWatch } from "@opencode/core/filesystem/file-watch"
 import { Location } from "@opencode/core/location"
 import { RelativePath } from "@opencode/core/schema"
-import { FileNotFoundError, ServiceUnavailableError } from "@opencode/protocol/errors"
+import { ConflictError, FileNotFoundError, ServiceUnavailableError } from "@opencode/protocol/errors"
 import { Effect, Option, Stream } from "effect"
 import { type HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
@@ -82,6 +82,34 @@ export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handler
             )
         }),
       )
+      .handle("fs.mkdir", (ctx) =>
+        response(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.Service
+            return yield* fs.mkdir({ path: RelativePath.make(ctx.payload.path) }).pipe(Effect.mapError(entryError))
+          }),
+        ),
+      )
+      .handle("fs.move", (ctx) =>
+        response(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.Service
+            return yield* fs.move(ctx.payload).pipe(Effect.mapError(entryError))
+          }),
+        ),
+      )
+      .handle("fs.remove", (ctx) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.Service
+          yield* fs
+            .remove({ path: RelativePath.make(ctx.payload.path) })
+            .pipe(
+              Effect.mapError(
+                (error) => new FileNotFoundError({ path: error.path, message: `Not found: ${error.path}` }),
+              ),
+            )
+        }),
+      )
       .handle("fs.unwatch", (ctx) =>
         Effect.gen(function* () {
           const location = yield* Location.Service
@@ -93,6 +121,12 @@ export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handler
       )
   }),
 )
+
+function entryError(error: FileSystem.NotFoundError | FileSystem.ExistsError) {
+  if (error._tag === "FileSystem.ExistsError")
+    return new ConflictError({ message: `Already exists: ${error.path}`, resource: error.path })
+  return new FileNotFoundError({ path: error.path, message: `Not found: ${error.path}` })
+}
 
 function decodeRequestPath(url: string) {
   const raw = new URL(url, "http://localhost").pathname.slice(13)

@@ -205,6 +205,12 @@ import type {
   ExperimentalFileWatchOutput,
   ExperimentalFileUnwatchInput,
   ExperimentalFileUnwatchOutput,
+  ExperimentalFileMkdirInput,
+  ExperimentalFileMkdirOutput,
+  ExperimentalFileMoveInput,
+  ExperimentalFileMoveOutput,
+  ExperimentalFileRemoveInput,
+  ExperimentalFileRemoveOutput,
   CommandListInput,
   CommandListOutput,
   SkillListInput,
@@ -1389,9 +1395,33 @@ const EndpointExperimentalFileUnwatch = (raw: RawClient["server.fs"]) => (input:
     ),
   )
 
+const EndpointExperimentalFileMkdir = (raw: RawClient["server.fs"]) => (input: ExperimentalFileMkdirInput) =>
+  preserveEffect<ExperimentalFileMkdirOutput>()(
+    raw["fs.mkdir"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointExperimentalFileMove = (raw: RawClient["server.fs"]) => (input: ExperimentalFileMoveInput) =>
+  preserveEffect<ExperimentalFileMoveOutput>()(
+    raw["fs.move"]({ query: { location: input["location"] }, payload: { from: input["from"], to: input["to"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const EndpointExperimentalFileRemove = (raw: RawClient["server.fs"]) => (input: ExperimentalFileRemoveInput) =>
+  preserveEffect<ExperimentalFileRemoveOutput>()(
+    raw["fs.remove"]({ query: { location: input["location"] }, payload: { path: input["path"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
 const adaptGroupExperimentalFile = (raw: RawClient["server.fs"]) => ({
   watch: EndpointExperimentalFileWatch(raw),
   unwatch: EndpointExperimentalFileUnwatch(raw),
+  mkdir: EndpointExperimentalFileMkdir(raw),
+  move: EndpointExperimentalFileMove(raw),
+  remove: EndpointExperimentalFileRemove(raw),
 })
 
 const EndpointCommandList = (raw: RawClient["server.command"]) => (input?: CommandListInput) =>
@@ -2066,6 +2096,12 @@ const adaptClient = (raw: RawClient) => {
       watch: client.experimental.file.watch,
       /** @deprecated Use `client.experimental.file.unwatch`. Removed in the next minor. */
       unwatch: client.experimental.file.unwatch,
+      /** @deprecated Use `client.experimental.file.mkdir`. Removed in the next minor. */
+      mkdir: client.experimental.file.mkdir,
+      /** @deprecated Use `client.experimental.file.move`. Removed in the next minor. */
+      move: client.experimental.file.move,
+      /** @deprecated Use `client.experimental.file.remove`. Removed in the next minor. */
+      remove: client.experimental.file.remove,
     },
     /** @deprecated Use `client.experimental.migration`. Removed in the next minor. */
     migration: {

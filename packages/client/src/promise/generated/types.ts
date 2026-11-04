@@ -4268,6 +4268,28 @@ export type ExperimentalFileUnwatchInput = {
 
 export type ExperimentalFileUnwatchOutput = void
 
+export type ExperimentalFileMkdirInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly path: string
+}
+
+export type ExperimentalFileMkdirOutput = { location: LocationPublicRef; data: FileSystemWrite }
+
+export type ExperimentalFileMoveInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly from: string
+  readonly to: string
+}
+
+export type ExperimentalFileMoveOutput = { location: LocationPublicRef; data: FileSystemWrite }
+
+export type ExperimentalFileRemoveInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly path: string
+}
+
+export type ExperimentalFileRemoveOutput = void
+
 export type CommandListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 
 export type CommandListOutput = { location: LocationPublicRef; data: Array<CommandInfo> }
@@ -4935,6 +4957,24 @@ export type FileUnwatchInput = ExperimentalFileUnwatchInput
 
 /** @deprecated Use `ExperimentalFileUnwatchOutput`. Removed in the next minor. */
 export type FileUnwatchOutput = ExperimentalFileUnwatchOutput
+
+/** @deprecated Use `ExperimentalFileMkdirInput`. Removed in the next minor. */
+export type FileMkdirInput = ExperimentalFileMkdirInput
+
+/** @deprecated Use `ExperimentalFileMkdirOutput`. Removed in the next minor. */
+export type FileMkdirOutput = ExperimentalFileMkdirOutput
+
+/** @deprecated Use `ExperimentalFileMoveInput`. Removed in the next minor. */
+export type FileMoveInput = ExperimentalFileMoveInput
+
+/** @deprecated Use `ExperimentalFileMoveOutput`. Removed in the next minor. */
+export type FileMoveOutput = ExperimentalFileMoveOutput
+
+/** @deprecated Use `ExperimentalFileRemoveInput`. Removed in the next minor. */
+export type FileRemoveInput = ExperimentalFileRemoveInput
+
+/** @deprecated Use `ExperimentalFileRemoveOutput`. Removed in the next minor. */
+export type FileRemoveOutput = ExperimentalFileRemoveOutput
 
 /** @deprecated Use `ExperimentalMigrationV1StatusOutput`. Removed in the next minor. */
 export type MigrationV1StatusOutput = ExperimentalMigrationV1StatusOutput

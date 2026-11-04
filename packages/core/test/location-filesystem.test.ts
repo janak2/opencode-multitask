@@ -240,4 +240,131 @@ describe("FileSystem", () => {
       }),
     ),
   )
+
+  const entry = (value: string) => ({ path: RelativePath.make(value) })
+  const cases: {
+    name: string
+    run: (filesystem: FileSystem.Interface) => Effect.Effect<unknown, FileSystem.NotFoundError | FileSystem.ExistsError>
+    result: string
+    exists?: string[]
+    missing?: string[]
+  }[] = [
+    { name: "mkdir", run: (f) => f.mkdir(entry("new")), result: "ok", exists: ["current/new"] },
+    { name: "mkdir existing", run: (f) => f.mkdir(entry("a.txt")), result: "FileSystem.ExistsError" },
+    {
+      name: "mkdir with ..",
+      run: (f) => f.mkdir(entry("../escape")),
+      result: "FileSystem.NotFoundError",
+      missing: ["escape"],
+    },
+    {
+      name: "mkdir through symlink",
+      run: (f) => f.mkdir(entry("link/inside")),
+      result: "FileSystem.NotFoundError",
+      missing: ["outside/inside"],
+    },
+    { name: "mkdir root", run: (f) => f.mkdir(entry(".")), result: "FileSystem.NotFoundError" },
+    {
+      name: "move",
+      run: (f) => f.move({ from: "a.txt", to: "dir/a.txt" }),
+      result: "ok",
+      exists: ["current/dir/a.txt"],
+      missing: ["current/a.txt"],
+    },
+    {
+      name: "move onto existing",
+      run: (f) => f.move({ from: "a.txt", to: "dir/b.txt" }),
+      result: "FileSystem.ExistsError",
+      exists: ["current/a.txt", "current/dir/b.txt"],
+    },
+    {
+      name: "move with ..",
+      run: (f) => f.move({ from: "a.txt", to: "../a.txt" }),
+      result: "FileSystem.NotFoundError",
+      exists: ["current/a.txt"],
+      missing: ["a.txt"],
+    },
+    {
+      name: "move from symlink",
+      run: (f) => f.move({ from: "link/secret.txt", to: "stolen.txt" }),
+      result: "FileSystem.NotFoundError",
+      exists: ["outside/secret.txt"],
+    },
+    {
+      name: "move root",
+      run: (f) => f.move({ from: ".", to: "dir/root" }),
+      result: "FileSystem.NotFoundError",
+    },
+    {
+      name: "remove directory",
+      run: (f) => f.remove(entry("dir")),
+      result: "ok",
+      missing: ["current/dir"],
+    },
+    {
+      name: "remove symlink",
+      run: (f) => f.remove(entry("link")),
+      result: "ok",
+      exists: ["outside/secret.txt"],
+      missing: ["current/link"],
+    },
+    {
+      name: "remove through symlink",
+      run: (f) => f.remove(entry("link/secret.txt")),
+      result: "FileSystem.NotFoundError",
+      exists: ["outside/secret.txt"],
+    },
+    {
+      name: "remove with ..",
+      run: (f) => f.remove(entry("../outside")),
+      result: "FileSystem.NotFoundError",
+      exists: ["outside/secret.txt"],
+    },
+    { name: "remove root", run: (f) => f.remove(entry(".")), result: "FileSystem.NotFoundError", exists: ["current"] },
+  ]
+
+  it.live("confines mkdir, move and remove to the location", () =>
+    Effect.forEach(cases, (item) =>
+      withTmp((directory) =>
+        Effect.gen(function* () {
+          const current = path.join(directory, "current")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(current, "dir"), { recursive: true })
+            await fs.mkdir(path.join(directory, "outside"))
+            await fs.writeFile(path.join(current, "a.txt"), "a")
+            await fs.writeFile(path.join(current, "dir", "b.txt"), "b")
+            await fs.writeFile(path.join(directory, "outside", "secret.txt"), "secret")
+            await fs.symlink(path.join(directory, "outside"), path.join(current, "link"), "junction")
+          })
+          const result = yield* Effect.gen(function* () {
+            const filesystem = yield* FileSystem.Service
+            return yield* item.run(filesystem).pipe(
+              Effect.as("ok"),
+              Effect.catch((error) => Effect.succeed(error._tag)),
+            )
+          }).pipe(provide(current))
+          const present = (relative: string) =>
+            Effect.promise(() =>
+              fs.lstat(path.join(directory, relative)).then(
+                () => true,
+                () => false,
+              ),
+            )
+          expect({ name: item.name, result }).toEqual({ name: item.name, result: item.result })
+          for (const relative of item.exists ?? [])
+            expect({ name: item.name, relative, present: yield* present(relative) }).toEqual({
+              name: item.name,
+              relative,
+              present: true,
+            })
+          for (const relative of item.missing ?? [])
+            expect({ name: item.name, relative, present: yield* present(relative) }).toEqual({
+              name: item.name,
+              relative,
+              present: false,
+            })
+        }),
+      ),
+    ),
+  )
 })

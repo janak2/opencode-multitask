@@ -1991,6 +1991,15 @@ export interface FileApi<E = never> {
 
   /** @deprecated Use `client.experimental.file.unwatch`. Removed in the next minor. */
   readonly unwatch: ExperimentalFileUnwatchOperation<E>
+
+  /** @deprecated Use `client.experimental.file.mkdir`. Removed in the next minor. */
+  readonly mkdir: ExperimentalFileMkdirOperation<E>
+
+  /** @deprecated Use `client.experimental.file.move`. Removed in the next minor. */
+  readonly move: ExperimentalFileMoveOperation<E>
+
+  /** @deprecated Use `client.experimental.file.remove`. Removed in the next minor. */
+  readonly remove: ExperimentalFileRemoveOperation<E>
 }
 
 export type ExperimentalFileWatchInput = {
@@ -2011,9 +2020,40 @@ export type ExperimentalFileUnwatchOperation<E = never> = (
   input: ExperimentalFileUnwatchInput,
 ) => Effect.Effect<ExperimentalFileUnwatchOutput, E>
 
+export type ExperimentalFileMkdirInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly path: string
+}
+export type ExperimentalFileMkdirOutput = { readonly location: Location.PublicRef; readonly data: FileSystem.Write }
+export type ExperimentalFileMkdirOperation<E = never> = (
+  input: ExperimentalFileMkdirInput,
+) => Effect.Effect<ExperimentalFileMkdirOutput, E>
+
+export type ExperimentalFileMoveInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly from: string
+  readonly to: string
+}
+export type ExperimentalFileMoveOutput = { readonly location: Location.PublicRef; readonly data: FileSystem.Write }
+export type ExperimentalFileMoveOperation<E = never> = (
+  input: ExperimentalFileMoveInput,
+) => Effect.Effect<ExperimentalFileMoveOutput, E>
+
+export type ExperimentalFileRemoveInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly path: string
+}
+export type ExperimentalFileRemoveOutput = void
+export type ExperimentalFileRemoveOperation<E = never> = (
+  input: ExperimentalFileRemoveInput,
+) => Effect.Effect<ExperimentalFileRemoveOutput, E>
+
 export interface ExperimentalFileApi<E = never> {
   readonly watch: ExperimentalFileWatchOperation<E>
   readonly unwatch: ExperimentalFileUnwatchOperation<E>
+  readonly mkdir: ExperimentalFileMkdirOperation<E>
+  readonly move: ExperimentalFileMoveOperation<E>
+  readonly remove: ExperimentalFileRemoveOperation<E>
 }
 
 export type CommandListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
@@ -2977,6 +3017,33 @@ export type FileUnwatchOutput = ExperimentalFileUnwatchOutput
 
 /** @deprecated Use `ExperimentalFileUnwatchOperation`. Removed in the next minor. */
 export type FileUnwatchOperation<E = never> = ExperimentalFileUnwatchOperation<E>
+
+/** @deprecated Use `ExperimentalFileMkdirInput`. Removed in the next minor. */
+export type FileMkdirInput = ExperimentalFileMkdirInput
+
+/** @deprecated Use `ExperimentalFileMkdirOutput`. Removed in the next minor. */
+export type FileMkdirOutput = ExperimentalFileMkdirOutput
+
+/** @deprecated Use `ExperimentalFileMkdirOperation`. Removed in the next minor. */
+export type FileMkdirOperation<E = never> = ExperimentalFileMkdirOperation<E>
+
+/** @deprecated Use `ExperimentalFileMoveInput`. Removed in the next minor. */
+export type FileMoveInput = ExperimentalFileMoveInput
+
+/** @deprecated Use `ExperimentalFileMoveOutput`. Removed in the next minor. */
+export type FileMoveOutput = ExperimentalFileMoveOutput
+
+/** @deprecated Use `ExperimentalFileMoveOperation`. Removed in the next minor. */
+export type FileMoveOperation<E = never> = ExperimentalFileMoveOperation<E>
+
+/** @deprecated Use `ExperimentalFileRemoveInput`. Removed in the next minor. */
+export type FileRemoveInput = ExperimentalFileRemoveInput
+
+/** @deprecated Use `ExperimentalFileRemoveOutput`. Removed in the next minor. */
+export type FileRemoveOutput = ExperimentalFileRemoveOutput
+
+/** @deprecated Use `ExperimentalFileRemoveOperation`. Removed in the next minor. */
+export type FileRemoveOperation<E = never> = ExperimentalFileRemoveOperation<E>
 
 /** @deprecated Use `ExperimentalMigrationV1StatusOutput`. Removed in the next minor. */
 export type MigrationV1StatusOutput = ExperimentalMigrationV1StatusOutput

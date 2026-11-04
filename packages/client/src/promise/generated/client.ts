@@ -203,6 +203,12 @@ import type {
   ExperimentalFileWatchOutput,
   ExperimentalFileUnwatchInput,
   ExperimentalFileUnwatchOutput,
+  ExperimentalFileMkdirInput,
+  ExperimentalFileMkdirOutput,
+  ExperimentalFileMoveInput,
+  ExperimentalFileMoveOutput,
+  ExperimentalFileRemoveInput,
+  ExperimentalFileRemoveOutput,
   CommandListInput,
   CommandListOutput,
   SkillListInput,
@@ -1357,6 +1363,45 @@ export function make(options: ClientOptions) {
             {
               method: "DELETE",
               path: `/api/experimental/fs/watch`,
+              query: { location: input["location"] },
+              body: { path: input["path"] },
+              successStatus: 204,
+              declaredStatuses: [400, 401, 404],
+              empty: true,
+            },
+            requestOptions,
+          ),
+        mkdir: (input: ExperimentalFileMkdirInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalFileMkdirOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/fs/mkdir`,
+              query: { location: input["location"] },
+              body: { path: input["path"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404, 409],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        move: (input: ExperimentalFileMoveInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalFileMoveOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/fs/move`,
+              query: { location: input["location"] },
+              body: { from: input["from"], to: input["to"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404, 409],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        remove: (input: ExperimentalFileRemoveInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalFileRemoveOutput>(
+            {
+              method: "DELETE",
+              path: `/api/experimental/fs/remove`,
               query: { location: input["location"] },
               body: { path: input["path"] },
               successStatus: 204,
@@ -2746,6 +2791,12 @@ export function make(options: ClientOptions) {
       watch: client.experimental.file.watch,
       /** @deprecated Use `client.experimental.file.unwatch`. Removed in the next minor. */
       unwatch: client.experimental.file.unwatch,
+      /** @deprecated Use `client.experimental.file.mkdir`. Removed in the next minor. */
+      mkdir: client.experimental.file.mkdir,
+      /** @deprecated Use `client.experimental.file.move`. Removed in the next minor. */
+      move: client.experimental.file.move,
+      /** @deprecated Use `client.experimental.file.remove`. Removed in the next minor. */
+      remove: client.experimental.file.remove,
     },
     /** @deprecated Use `client.experimental.migration`. Removed in the next minor. */
     migration: {

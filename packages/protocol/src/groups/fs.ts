@@ -3,7 +3,7 @@ import { Location } from "@opencode/schema/location"
 import { PositiveInt } from "@opencode/schema/schema"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api"
-import { FileNotFoundError, ServiceUnavailableError } from "../errors.js"
+import { ConflictError, FileNotFoundError, ServiceUnavailableError } from "../errors.js"
 import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 const ListQuery = Schema.Struct({
@@ -23,6 +23,15 @@ const WriteQuery = Schema.Struct({
 
 const WatchPayload = Schema.Struct({
   path: Schema.String.annotate({ description: "A file path relative to the requested location." }),
+})
+
+const EntryPayload = Schema.Struct({
+  path: Schema.String.annotate({ description: "A path relative to the requested location." }),
+})
+
+const MovePayload = Schema.Struct({
+  from: Schema.String.annotate({ description: "The entry's path relative to the requested location." }),
+  to: Schema.String.annotate({ description: "The new path relative to the requested location." }),
 })
 
 const FindQuery = Schema.Struct({
@@ -125,6 +134,57 @@ export const FileSystemGroup = HttpApiGroup.make("server.fs")
           summary: "Unwatch file",
           description:
             "Stop watching one file relative to the requested location. Experimental: may change without compatibility guarantees.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("fs.mkdir", "/api/experimental/fs/mkdir", {
+      query: LocationQuery,
+      payload: EntryPayload,
+      success: Location.response(FileSystem.Write),
+      error: [FileNotFoundError, ConflictError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.fs.mkdir",
+          summary: "Create directory",
+          description:
+            "Create one directory inside the requested location, whose parent must exist, and return its absolute path. Fails when the path exists. Experimental: may change without compatibility guarantees.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("fs.move", "/api/experimental/fs/move", {
+      query: LocationQuery,
+      payload: MovePayload,
+      success: Location.response(FileSystem.Write),
+      error: [FileNotFoundError, ConflictError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.fs.move",
+          summary: "Move entry",
+          description:
+            "Rename a file or directory inside the requested location and return its new absolute path. Fails rather than replacing an existing destination. Experimental: may change without compatibility guarantees.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.delete("fs.remove", "/api/experimental/fs/remove", {
+      query: LocationQuery,
+      payload: EntryPayload,
+      success: HttpApiSchema.NoContent,
+      error: FileNotFoundError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.fs.remove",
+          summary: "Remove entry",
+          description:
+            "Remove a file, or a directory with its contents, inside the requested location. A symlink is removed, not its target. Experimental: may change without compatibility guarantees.",
         }),
       ),
   )
