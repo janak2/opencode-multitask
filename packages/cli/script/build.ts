@@ -107,6 +107,12 @@ const pluginRuntimePlugin: BunPlugin = {
       contents: pluginRuntimeModulesSource,
       loader: "ts",
     }))
+    // With splitting, Bun 1.4.4 drops the namespace for `export * from "ws"`, so every websocket upgrade throws a
+    // ReferenceError. Named re-exports bundle correctly; Effect only uses these two, and Bun's builtin ws has both.
+    build.onLoad({ filter: /platform-node-shared[/\\]dist[/\\]NodeWS\.js$/ }, () => ({
+      contents: 'export { WebSocket, WebSocketServer } from "ws"',
+      loader: "js",
+    }))
     build.onLoad({ filter: /[/\\]internal[/\\]httpApi(?:Scalar|Swagger)\.js$/ }, () => ({
       contents:
         'export const css = ""; export const javascript = \'document.body.textContent = "Scalar/Swagger UI assets are not bundled in OpenCode"\'',
