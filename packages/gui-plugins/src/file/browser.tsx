@@ -2,7 +2,8 @@ import { createMemo, createUniqueId, For, onCleanup, Show, type Accessor } from 
 import { createStore } from "solid-js/store"
 import { createQuery, keepPreviousData } from "@tanstack/solid-query"
 import { Icon } from "@opencode/ui/icon"
-import { Select } from "@opencode/ui/select"
+import { IconButton } from "@opencode/ui/icon-button"
+import { Menu } from "@opencode/ui/menu"
 import { showToast } from "@opencode/ui/toast"
 import { SessionFilePanelV2, SessionFilePanelV2Empty } from "@opencode/session-ui/v2/session-file-panel-v2"
 import { SessionReviewV2Sidebar, SessionReviewV2SidebarToggle } from "@opencode/session-ui/v2/session-review-v2"
@@ -45,7 +46,7 @@ export function SessionFileBrowserTab(props: {
   const shared = useShared()
   const file = props.screen.file
   const resultsID = `session-file-browser-results-${createUniqueId()}`
-  const [store, setStore] = createStore<{ explicitHighlight?: string }>({})
+  const [store, setStore] = createStore<{ explicitHighlight?: string; folderMenu: boolean }>({ folderMenu: false })
   const filter = () => shared.filter.get(props.session.key)
   const setFilter = (value: string) => shared.filter.set(props.session.key, value)
   const setExplicitHighlight = (value: string) => setStore("explicitHighlight", value)
@@ -97,6 +98,75 @@ export function SessionFileBrowserTab(props: {
     return value && folders().includes(value) ? value : undefined
   }
 
+  const project = () => (props.session.project?.id === "global" ? undefined : props.session.project)
+  const folderLabel = (path: string) => (path === props.session.directory ? title() : getFilename(path) || path)
+
+  const selectFolder = (path: string) =>
+    shared.folder.set(props.session.key, folders().includes(path) ? path : undefined)
+
+  const failed = (error: Error) =>
+    showToast({ variant: "error", title: ctx.t("common.requestFailed"), description: error.message })
+
+  const saveFolders = async (next: string[]) => {
+    const id = project()?.id
+
+    if (!id) throw new Error(ctx.t("folder.noProject"))
+
+    const saved = await props.session.server.client.project.update({ projectID: id, folders: next })
+
+    return saved.folders
+  }
+
+  const pickFolders = async () => {
+    if (ctx.desktop && props.session.server.local)
+      return ctx.desktop.pick({ directory: true, multiple: true, title: ctx.t("folder.add") })
+
+    const path = await ctx.dialogs.prompt({
+      title: ctx.t("folder.add"),
+      description: ctx.t("folder.add.description"),
+      placeholder: ctx.t("folder.add.placeholder"),
+      submit: ctx.t("folder.add.submit"),
+    })
+
+    return path ? [path.trim()] : []
+  }
+
+  const addFolders = async () => {
+    const picked = await pickFolders()
+
+    const added = [...new Set(picked)].filter(
+      (path) =>
+        path && path !== project()?.worktree && path !== props.session.directory && !folders().includes(path),
+    )
+
+    if (picked.length > 0 && added.length === 0) return selectFolder(picked[0])
+
+    if (added.length === 0) return
+
+    const saved = await saveFolders([...folders(), ...added])
+    const kept = added.filter((path) => saved.includes(path))
+
+    if (kept.length < added.length) failed(new Error(ctx.t("folder.notSaved")))
+
+    if (kept[0]) shared.folder.set(props.session.key, kept[0])
+  }
+
+  const removeFolder = async (path: string) => {
+    const confirmed = await ctx.dialogs.confirm({
+      title: ctx.t("folder.remove.title"),
+      description: ctx.t("folder.remove.description", { path }),
+      confirm: ctx.t("folder.remove"),
+      danger: true,
+    })
+
+    if (!confirmed) return
+    const saved = await saveFolders(folders().filter((item) => item !== path))
+
+    if (saved.includes(path)) return failed(new Error(ctx.t("folder.notSaved")))
+
+    if (shared.folder.get(props.session.key) === path) shared.folder.set(props.session.key, undefined)
+  }
+
   const optionID = (path: string) => `${resultsID}-option-${files().indexOf(path)}`
 
   const onFilterKeyDown = (event: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
@@ -136,18 +206,66 @@ export function SessionFileBrowserTab(props: {
           open={sidebarOpened()}
           transition={props.state.transition()}
           title={
-            <Show when={folders().length > 0} fallback={<span class="truncate font-[530]">{title()}</span>}>
-              <Select
-                options={roots()}
-                current={folder() ?? props.session.directory}
-                label={(path) => (path === props.session.directory ? title() : getFilename(path) || path)}
+            <Show when={project()} fallback={<span class="truncate font-[530]">{title()}</span>}>
+              <Menu
+                open={store.folderMenu}
+                onOpenChange={(open) => setStore("folderMenu", open)}
                 placement="bottom-start"
                 gutter={6}
-                aria-label={ctx.t("tree.folder")}
-                onSelect={(path) =>
-                  path && shared.folder.set(props.session.key, path === props.session.directory ? undefined : path)
-                }
-              />
+              >
+                <Menu.Trigger
+                  class="flex h-6 min-w-0 max-w-full items-center gap-1 rounded-[4px] pl-2 pr-1 hover:bg-v2-overlay-simple-overlay-hover data-[expanded]:bg-v2-overlay-simple-overlay-hover"
+                  aria-label={ctx.t("tree.folder")}
+                >
+                  <span class="truncate font-[530]">{folderLabel(folder() ?? props.session.directory)}</span>
+                  <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+                </Menu.Trigger>
+                <Menu.Portal>
+                  <Menu.Content class="max-w-[320px]">
+                    <Menu.RadioGroup value={folder() ?? props.session.directory} onChange={selectFolder}>
+                      <For each={roots()}>
+                        {(path) => (
+                          <Menu.RadioItem
+                            value={path}
+                            onKeyDown={(event) => {
+                              if (path === props.session.directory) return
+
+                              if (event.key !== "Delete" && event.key !== "Backspace") return
+                              event.preventDefault()
+                              setStore("folderMenu", false)
+                              removeFolder(path).catch(failed)
+                            }}
+                          >
+                            <span class="min-w-0 flex-1 truncate" title={path}>
+                              {folderLabel(path)}
+                            </span>
+                            <Show when={path !== props.session.directory}>
+                              <IconButton
+                                size="small"
+                                variant="ghost-muted"
+                                icon={<Icon name="close-small" />}
+                                aria-label={ctx.t("folder.remove")}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onPointerUp={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setStore("folderMenu", false)
+                                  removeFolder(path).catch(failed)
+                                }}
+                              />
+                            </Show>
+                          </Menu.RadioItem>
+                        )}
+                      </For>
+                    </Menu.RadioGroup>
+                    <Menu.Separator />
+                    <Menu.Item onSelect={() => addFolders().catch(failed)}>
+                      <Icon name="plus" class="text-v2-icon-icon-muted" />
+                      {ctx.t("folder.add")}
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Portal>
+              </Menu>
             </Show>
           }
           filter={filter()}
