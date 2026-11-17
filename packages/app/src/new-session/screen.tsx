@@ -10,7 +10,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
 import { createComposerModel } from "@/composer/model"
 import { useComposerCommands } from "@/composer/commands"
-import { createNewSessionComposerAdapter } from "./composer-adapter"
+import { createNewSessionComposerAdapter, createNewSessionStartStore } from "./composer-adapter"
 import { NewSessionView } from "./view"
 import { createNewSessionWorkspaceController } from "./workspace/controller"
 import { useNewSessionCommands } from "./commands"
@@ -37,14 +37,22 @@ export default function NewSessionPage(props: { draftId: string }) {
     },
   })
 
-  const mcp = createDraftMcpControls({ draftID: props.draftId, worktree: workspace.selection.value })
+  const start = tabs.state(tabs.draft(props.draftId), "new-session-start", createNewSessionStartStore)
+
+  const mcp = createDraftMcpControls({
+    draftID: props.draftId,
+    worktree: workspace.selection.value,
+    preparing: () => start.view().preparingMcp,
+  })
 
   const composer = createNewSessionComposerAdapter({
     draftID: props.draftId,
     worktree: workspace.selection.value,
+    root: workspace.project.root,
     branch: workspace.bar.branch,
     submitted: workspace.selection.remember,
     mcp,
+    start,
   })
 
   const model = createComposerModel(composer.adapter)
@@ -108,7 +116,7 @@ export default function NewSessionPage(props: { draftId: string }) {
       if (!ready) return
 
       // Search projects opened this draft; the picker returns focus to the composer when it closes.
-      if (layout.draft.projectSearch.take()) location()
+      if (layout.draft.projectSearch.take(props.draftId)) location()
       else model.restoreFocus()
     }),
   )

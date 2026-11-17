@@ -1,5 +1,17 @@
-import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show } from "solid-js"
+import {
+  createComputed,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  type JSX,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+} from "solid-js"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import { Key } from "@solid-primitives/keyed"
 import { createStore } from "solid-js/store"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable, useSortable } from "@dnd-kit/solid/sortable"
@@ -9,7 +21,7 @@ import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { arrayMove } from "@/runtime/array-move"
 import { tabHref, tabKey, type SessionTab, type Tab } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
-import { DraftTabItem, TabNavItem } from "@/shell/titlebar/tab-nav"
+import { DraftTabItem, TabNavItem, type TabCloseActions } from "@/shell/titlebar/tab-nav"
 import { useGlobal, useServerCtx, type ServerCtx } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useCommand } from "@/shell/commands/command"
@@ -26,44 +38,83 @@ import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { sessionTitle } from "@/session/title"
 import { errorMessage } from "@/shell/layout/helpers"
 import { notifySessionTabsRemoved } from "./session-events"
-import { setSidebarUnread } from "@/shell/sidebar-peek"
-import { SectionHeader } from "./inbox"
-import { displayName } from "@opencode/ui/project-avatar"
-import { IconButton } from "@opencode/ui/icon-button"
+import {
+  INITIAL_SESSION_TAB_LOADS_STATE,
+  selectSessionTabView,
+  transitionSessionTabLoads,
+  type SessionTabLoadsEffect,
+  type SessionTabLoadsEvent,
+  type SessionTabView,
+} from "./tab-load-machine"
 import { Icon } from "@opencode/ui/icon"
-import { Tooltip } from "@opencode/ui/tooltip"
+import { IconButton } from "@opencode/ui/icon-button"
+import { displayName } from "@opencode/ui/project-avatar"
 import { useSettingsSurface } from "@/settings/surface"
+import { setSidebarUnread } from "@/shell/sidebar-peek"
+import { createSideFocus } from "@/runtime/plugin/closed-tabs"
+import { createEventListener } from "@solid-primitives/event-listener"
+import {
+  INITIAL_TAB_HINTS_STATE,
+  selectTabHintsShown,
+  transitionTabHints,
+  type TabHintsEffect,
+  type TabHintsEvent,
+} from "./tab-hints-machine"
 import type { SessionInfo } from "@opencode/client/promise"
+
+const IS_MAC = typeof navigator !== "undefined" && /(Mac|iPod|iPhone|iPad)/.test(navigator.platform)
 
 export const previousSessionCommand = { id: "session.previous", keybind: "alt+arrowup" }
 
 export const nextSessionCommand = { id: "session.next", keybind: "alt+arrowdown" }
 
-function SessionTabSlot(props: {
-  tab: SessionTab
-  id: string
-  index: number
-  active: boolean
-  orientation: "horizontal" | "vertical"
-  session: SessionInfo | undefined
-  preparing: boolean
-  unread: boolean
-  attention: boolean
-  loading: boolean
-  fallbackTitle?: string
-  fallbackDirectory?: string
-  onRename: (title: string) => Promise<void>
-  onDelete: () => void
-  onNavigate: (element: HTMLDivElement) => void
-  onClose: () => void
-  onIntent: (hovered: boolean) => void
-}) {
+// A row the For loop still renders for a tab just removed from the strip.
+const hiddenTabView: SessionTabView = {
+  phase: "loading",
+  visible: false,
+  session: undefined,
+  fallbackTitle: "none",
+  fallbackDirectory: undefined,
+}
+
+function SessionTabSlot(
+  props: TabCloseActions & {
+    tab: SessionTab
+    id: string
+    index: number
+    group?: string
+    footer?: JSX.Element
+    label?: string
+    hideAvatar?: boolean
+    active: boolean
+    orientation: "horizontal" | "vertical"
+    session: SessionInfo | undefined
+    preparing: boolean
+    unread: boolean
+    attention: boolean
+    loading: boolean
+    shortcut?: number
+    fallbackTitle?: string
+    fallbackDirectory?: string
+    muted?: boolean
+    menuItems?: () => JSX.Element
+    onDelete: () => void
+    onNavigate: (element: HTMLDivElement) => void
+  },
+) {
   const sortable = useSortable({
     get id() {
       return props.id
     },
     get index() {
       return props.index
+    },
+    // Rows only sort among rows of the same group, so a drag never crosses into another section.
+    get type() {
+      return props.group
+    },
+    get accept() {
+      return props.group
     },
   })
 
@@ -80,9 +131,8 @@ function SessionTabSlot(props: {
       classList={{
         "w-56 min-w-7 max-w-56 flex-shrink": props.orientation === "horizontal",
         "w-full shrink-0": props.orientation === "vertical",
+        "flex-col": !!props.footer,
       }}
-      onPointerEnter={() => props.onIntent(true)}
-      onPointerLeave={() => props.onIntent(false)}
     >
       <TabNavItem
         ref={(el) => {
@@ -95,40 +145,55 @@ function SessionTabSlot(props: {
         unread={props.unread}
         attention={props.attention}
         loading={props.loading}
+        shortcut={props.shortcut}
+        label={props.label}
+        hideAvatar={props.hideAvatar}
         fallbackTitle={props.fallbackTitle}
         fallbackDirectory={props.fallbackDirectory}
-        onRename={props.onRename}
+        muted={props.muted}
+        menuItems={props.menuItems}
         onDelete={props.onDelete}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
+        onCloseOthers={props.onCloseOthers}
+        onCloseAfter={props.onCloseAfter}
         active={props.active}
         dragging={sortable.isDragSource()}
         orientation={props.orientation}
       />
+      {props.footer}
     </div>
   )
 }
 
-function SessionTabEntry(props: {
-  tab: SessionTab
-  currentTab?: Tab
-  id: string
-  index: number
-  active: boolean
-  orientation: "horizontal" | "vertical"
-  serverCtx: ServerCtx | undefined
-  onVisibleChange: (visible: boolean) => void
-  onUnreadChange: (unread: boolean) => void
-  onNavigate: (element: HTMLDivElement) => void
-  onClose: () => void
-}) {
+function SessionTabEntry(
+  props: TabCloseActions & {
+    tab: SessionTab
+    currentTab?: Tab
+    id: string
+    index: number
+    group?: string
+    footer?: JSX.Element
+    label?: string
+    hideAvatar?: boolean
+    active: boolean
+    highlightActive?: boolean
+    orientation: "horizontal" | "vertical"
+    serverCtx: ServerCtx | undefined
+    view: SessionTabView
+    shortcut?: number
+    muted?: boolean
+    menuItems?: () => JSX.Element
+    onUnreadChange: (unread: boolean) => void
+    onNavigate: (element: HTMLDivElement) => void
+  },
+) {
   const tabs = useTabs()
   const language = useLanguage()
   const dialog = useDialog()
   const sdk = createMemo(() => props.serverCtx?.sdk ?? null)
-  const pending = createMemo(() => tabs.pendingSession(props.tab.server, props.tab.sessionId))
-  const cachedSession = createMemo(() => props.serverCtx?.data.session.get(props.tab.sessionId))
   const persisted = createMemo(() => tabs.info[props.id])
+  const session = () => props.view.session
 
   const status = useSessionTabAvatarState(
     () => props.tab.server,
@@ -136,50 +201,8 @@ function SessionTabEntry(props: {
     () => true,
   )
 
-  // A busy session shows its progress indicator instead of the unread dot.
-  const unread = createMemo(() => status.unread() && !status.loading())
-
-  const [loadedSession] = createResource(
-    () => {
-      if (pending() || (!props.active && persisted()?.title)) return null
-      const ctx = props.serverCtx
-
-      return ctx ? { id: props.tab.sessionId, ctx } : null
-    },
-    ({ id, ctx }) =>
-      ctx.data.session
-        .sync(id)
-        .then(() => ctx.data.session.get(id))
-        .catch(() => undefined),
-  )
-
-  const session = createMemo(() => (pending() ? undefined : (cachedSession() ?? loadedSession())))
-  const missingSession = createMemo(() => !pending() && !!props.serverCtx && !loadedSession.loading && !session())
-  const visible = createMemo(() => !!pending() || !!session() || missingSession() || !!persisted()?.title)
-
-  const rename = async (title: string) => {
-    const value = session()
-    const ctx = props.serverCtx
-
-    if (!value || !ctx) return
-
-    ctx.data.session.remember({ ...value, title })
-
-    try {
-      await ctx.sdk.api.session.update({ sessionID: value.id, title })
-    } catch (err) {
-      const current = session()
-      const currentCtx = props.serverCtx
-
-      // A newer rename may have replaced this title while the save was in flight.
-      if (current && currentCtx && current.title === title)
-        currentCtx.data.session.remember({ ...current, title: value.title })
-      showToast({
-        title: language.t("common.requestFailed"),
-        description: err instanceof Error ? err.message : undefined,
-      })
-    }
-  }
+  // A busy session shows its progress indicator instead of the unread dot; a muted one shows neither.
+  const unread = createMemo(() => status.unread() && !status.loading() && !props.muted)
 
   function DeleteDialog() {
     const confirm = async () => {
@@ -224,18 +247,19 @@ function SessionTabEntry(props: {
     )
   }
 
-  createEffect(() => props.onVisibleChange(visible()))
   createEffect(() => props.onUnreadChange(unread()))
+
+  onCleanup(() => props.onUnreadChange(false))
 
   createEffect(() => {
     const ctx = props.serverCtx
     const id = props.tab.sessionId
 
     if (
-      pending() ||
+      props.view.phase === "preparing" ||
+      props.view.phase === "missing" ||
       !ctx ||
       props.active ||
-      ctx.data.session.missing(id) ||
       (!session() && !persisted()?.title) ||
       ctx.sdk.connection.status() !== "connected"
     )
@@ -256,39 +280,10 @@ function SessionTabEntry(props: {
         return
     }
 
-    const running = [id, ...ctx.data.session.family(id)].some(
-      (sessionID) => ctx.data.session.status(sessionID) === "running",
-    )
-
-    const timer = window.setTimeout(
-      () =>
-        void Promise.allSettled([
-          ctx.data.session.sync(id, { children: true }),
-          // The selected timeline loads the transcript; inactive tabs need metadata and the inbox,
-          // whose waiting work keeps the tab busy. Only a running session can wait on a permission
-          // or form, and reading either boots the session's location on the server.
-          ...(running ? [ctx.data.session.permission.sync(id), ctx.data.session.form.sync(id)] : []),
-          ctx.data.session.pending.sync(id),
-        ]),
-      300 + props.index * 50,
-    )
+    const timer = window.setTimeout(() => syncInactiveSession(ctx, id), 300 + props.index * 50)
 
     onCleanup(() => window.clearTimeout(timer))
   })
-
-  // A pointer resting on a tab usually clicks it next, so its transcript loads during the dwell. Passing over loads nothing.
-  let intent: number | undefined
-
-  const hover = (hovered: boolean) => {
-    window.clearTimeout(intent)
-    const ctx = props.serverCtx
-    const value = session()
-
-    if (!hovered || !ctx || !value || props.active || ctx.sdk.connection.status() !== "connected") return
-    intent = window.setTimeout(() => void ctx.data.session.message.sync(value.id).catch(() => undefined), 100)
-  }
-
-  onCleanup(() => window.clearTimeout(intent))
 
   createEffect(() => {
     const value = session()
@@ -309,50 +304,227 @@ function SessionTabEntry(props: {
   })
 
   return (
-    <Show when={visible()}>
+    <Show when={props.view.visible}>
       <SessionTabSlot
         tab={props.tab}
         id={props.id}
         index={props.index}
-        active={props.active}
+        group={props.group}
+        footer={props.footer}
+        label={props.label}
+        hideAvatar={props.hideAvatar}
+        active={props.active && props.highlightActive !== false}
         orientation={props.orientation}
         session={session()}
-        preparing={!!pending()}
+        preparing={props.view.phase === "preparing"}
         unread={unread()}
         attention={status.attention()}
         loading={status.loading()}
+        shortcut={props.shortcut}
         fallbackTitle={
-          pending()
-            ? language.t("session.tab.session")
-            : (persisted()?.title ?? (missingSession() ? language.t("session.tab.unknown") : undefined))
+          {
+            session: language.t("session.tab.session"),
+            persisted: persisted()?.title,
+            unknown: language.t("session.tab.unknown"),
+            none: undefined,
+          }[props.view.fallbackTitle]
         }
-        fallbackDirectory={pending()?.draft.directory ?? persisted()?.directory}
-        onRename={rename}
+        fallbackDirectory={props.view.fallbackDirectory}
+        muted={props.muted}
+        menuItems={props.menuItems}
         onDelete={() => dialog.show(() => <DeleteDialog />)}
         onNavigate={props.onNavigate}
         onClose={props.onClose}
-        onIntent={hover}
+        onCloseOthers={props.onCloseOthers}
+        onCloseAfter={props.onCloseAfter}
       />
     </Show>
   )
 }
 
-function DraftTabSlot(props: {
-  tab: Extract<Tab, { type: "draft" }>
-  id: string
-  index: number
-  active: boolean
-  orientation: "horizontal" | "vertical"
-  title: string
-  onNavigate: (element: HTMLDivElement) => void
-  onClose: () => void
+/**
+ * The keyboard shortcuts over a sidebar's session rows, in display order: ⌘1-9 pick a row (numbered while ⌘ is held),
+ * ⌥↑/⌥↓ step through rows, and ⇧⌥↑/⇧⌥↓ step to the next unread one. Returns whether the number hints show.
+ */
+export function createSessionRowNavigation(input: {
+  keys: () => string[]
+  current: () => string | undefined
+  unread: (key: string) => boolean
+  /** `reveal` asks to scroll the picked row into view. */
+  navigate: (key: string, reveal: boolean) => void
 }) {
+  const command = useCommand()
+  const language = useLanguage()
+
+  const selectAdjacent = (offset: -1 | 1, include?: (key: string) => boolean) => {
+    const key = adjacentTabKey(input.keys(), input.current(), offset, include)
+
+    if (key) input.navigate(key, false)
+  }
+
+  command.register("titlebar-tab-cycle", () => [
+    {
+      id: `tab.prev`,
+      category: "tab",
+      title: "",
+      keybind: `mod+option+ArrowLeft,ctrl+shift+tab`,
+      hidden: true,
+      onSelect: () => selectAdjacent(-1),
+    },
+    {
+      id: `tab.next`,
+      category: "tab",
+      title: "",
+      keybind: `mod+option+ArrowRight,ctrl+tab`,
+      hidden: true,
+      onSelect: () => selectAdjacent(1),
+    },
+    {
+      ...previousSessionCommand,
+      category: language.t("command.category.session"),
+      title: language.t("command.session.previous"),
+      onSelect: () => selectAdjacent(-1),
+    },
+    {
+      ...nextSessionCommand,
+      category: language.t("command.category.session"),
+      title: language.t("command.session.next"),
+      onSelect: () => selectAdjacent(1),
+    },
+    {
+      id: "session.previous.unseen",
+      category: language.t("command.category.session"),
+      title: language.t("command.session.previous.unseen"),
+      keybind: "shift+alt+arrowup",
+      onSelect: () => selectAdjacent(-1, input.unread),
+    },
+    {
+      id: "session.next.unseen",
+      category: language.t("command.category.session"),
+      title: language.t("command.session.next.unseen"),
+      keybind: "shift+alt+arrowdown",
+      onSelect: () => selectAdjacent(1, input.unread),
+    },
+  ])
+
+  // One registration numbers the visible rows, so a reorder, a close or a row coming into view never leaves two rows
+  // holding the same number while their owners update.
+  command.register("titlebar-tab-numbers", () =>
+    input
+      .keys()
+      .slice(0, 9)
+      .map((key, index) => ({
+        id: `tab.${index + 1}`,
+        category: "tab",
+        title: "",
+        keybind: `mod+${index + 1}`,
+        hidden: true,
+        onSelect: () => input.navigate(key, true),
+      })),
+  )
+
+  // Inside the side panel the same keys pick side tabs, so the numbers stay hidden there.
+  const [hints, setHints] = createSignal(INITIAL_TAB_HINTS_STATE)
+  const side = createSideFocus()
+  let hintTimer: ReturnType<typeof setTimeout> | undefined
+
+  const dispatchHints = (event: TabHintsEvent) => {
+    const next = transitionTabHints(hints(), event)
+
+    if (next.state !== hints()) setHints(next.state)
+    next.effects.forEach(runHintsEffect)
+  }
+
+  function runHintsEffect(effect: TabHintsEffect) {
+    clearTimeout(hintTimer)
+
+    if (effect.type === "delay.clear") return
+    hintTimer = setTimeout(() => dispatchHints({ type: "delay.elapsed", attempt: effect.attempt }), effect.delayMs)
+  }
+
+  const held = (event: KeyboardEvent | PointerEvent) => ({
+    mod: IS_MAC ? event.metaKey : event.ctrlKey,
+    extra: event.shiftKey || event.altKey || (IS_MAC ? event.ctrlKey : event.metaKey),
+  })
+
+  createEventListener(
+    window,
+    "keydown",
+    (event) =>
+      dispatchHints({
+        type: "key.down",
+        key:
+          event.key === (IS_MAC ? "Meta" : "Control")
+            ? "mod"
+            : /^Digit[1-9]$/.test(event.code) || /^[1-9]$/.test(event.key)
+              ? "digit"
+              : "other",
+        ...held(event),
+      }),
+    { capture: true },
+  )
+  createEventListener(window, "keyup", (event) => dispatchHints({ type: "modifiers", ...held(event) }), {
+    capture: true,
+  })
+  createEventListener(
+    window,
+    ["pointermove", "pointerdown"],
+    (event) => dispatchHints({ type: "modifiers", ...held(event) }),
+    { capture: true, passive: true },
+  )
+  createEventListener(window, "blur", () => dispatchHints({ type: "window.left" }))
+  createEventListener(document, "visibilitychange", () => {
+    if (document.hidden) dispatchHints({ type: "window.left" })
+  })
+  onCleanup(() => dispatchHints({ type: "disposed" }))
+
+  return () => selectTabHintsShown(hints()) && !side.focused()
+}
+
+/** Loads what an unselected session row shows: metadata, and the inbox and requests that keep it busy or waiting. */
+export function syncInactiveSession(ctx: ServerCtx, id: string) {
+  const running = [id, ...ctx.data.session.family(id)].some(
+    (sessionID) => ctx.data.session.status(sessionID) === "running",
+  )
+
+  void Promise.allSettled([
+    ctx.data.session.sync(id, { children: true }),
+    // The selected timeline loads the transcript; inactive tabs need metadata and the inbox,
+    // whose waiting work keeps the tab busy. Only a running session can wait on a permission
+    // or form, and reading either boots the session's location on the server.
+    ...(running ? [ctx.data.session.permission.sync(id), ctx.data.session.form.sync(id)] : []),
+    ctx.data.session.pending.sync(id),
+  ])
+}
+
+function DraftTabSlot(
+  props: TabCloseActions & {
+    tab: Extract<Tab, { type: "draft" }>
+    id: string
+    index: number
+    group?: string
+    footer?: JSX.Element
+    label?: string
+    active: boolean
+    orientation: "horizontal" | "vertical"
+    title: string
+    shortcut?: number
+    onNavigate: (element: HTMLDivElement) => void
+  },
+) {
   const sortable = useSortable({
     get id() {
       return props.id
     },
     get index() {
       return props.index
+    },
+    // Rows only sort among rows of the same group, so a drag never crosses into another section.
+    get type() {
+      return props.group
+    },
+    get accept() {
+      return props.group
     },
   })
 
@@ -369,6 +541,7 @@ function DraftTabSlot(props: {
       classList={{
         "w-56 min-w-7 max-w-56 flex-shrink": props.orientation === "horizontal",
         "w-full shrink-0": props.orientation === "vertical",
+        "flex-col": !!props.footer,
       }}
     >
       <DraftTabItem
@@ -377,32 +550,125 @@ function DraftTabSlot(props: {
         }}
         href={tabHref(props.tab)}
         title={props.title}
+        shortcut={props.shortcut}
+        label={props.label}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
+        onCloseOthers={props.onCloseOthers}
+        onCloseAfter={props.onCloseAfter}
         active={props.active}
         dragging={sortable.isDragSource()}
         orientation={props.orientation}
       />
+      {props.footer}
     </div>
   )
 }
 
+export type TabStripSection = {
+  key: string
+  /** Open tabs shown in this section, in display order. */
+  tabs: Tab[]
+  header?: JSX.Element
+  footer?: JSX.Element
+  /** The header already names the project, so session tabs leave out their project avatar. */
+  hideAvatars?: boolean
+}
+
+export type TabStripLeading = {
+  content: JSX.Element
+  /** Row keys in display order, in `tabKey` form so the current tab can match one. */
+  keys: string[]
+  unread: (key: string) => boolean
+  navigate: (key: string, reveal: boolean) => void
+}
+
 export function TitlebarTabStrip(props: {
   orientation?: "horizontal" | "vertical"
+  highlightActive?: boolean
   grouped?: boolean
   tabs: Tab[]
+  /** Vertical only: groups the rendered tabs under headers. Tabs in no section stay open but are not shown. */
+  sections?: TabStripSection[]
+  /** Vertical only: extra content rendered right after a tab row (e.g. its subagent sessions). */
+  tabFooter?: (tab: Tab) => JSX.Element | undefined
+  /** Vertical only: a faint trailing label on a tab row (e.g. its server). */
+  tabLabel?: (tab: Tab) => string | undefined
+  /** Vertical only: menu items shown above a session tab's own. */
+  tabMenu?: (tab: SessionTab) => JSX.Element
+  /** Vertical only: whether a session tab is muted, which swaps its unread dot for a muted mark. */
+  tabMuted?: (tab: SessionTab) => boolean
+  /** Vertical only: rows rendered above the tabs that share their shortcuts, numbered first (e.g. pinned sessions). */
+  leading?: TabStripLeading
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
   onClose: (tab: Tab) => void
+  onCloseTabs: (tabs: Tab[], keep: Tab) => void
   onReorder: (keys: string[]) => void
 }) {
   const global = useGlobal()
-  const tabs = useTabs()
   const language = useLanguage()
-  const command = useCommand()
-  const settingsSurface = useSettingsSurface()
+  const appTabs = useTabs()
   const vertical = () => props.orientation === "vertical"
-  let contentRef!: HTMLDivElement
+  const settingsSurface = useSettingsSurface()
+  const sections = createMemo(() => {
+    if (!vertical()) return
+    if (props.sections) return props.sections
+    if (!props.grouped) return
+    const groups = new Map<string, TabStripSection>()
+
+    props.tabs.forEach((tab) => {
+      const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+      const ctx = conn ? global.serverCtx(ServerConnection.key(conn)) : undefined
+      const session = tab.type === "session" ? ctx?.data.session.get(tab.sessionId) : undefined
+      const directory =
+        tab.type === "draft"
+          ? tab.directory
+          : (session?.location.directory ??
+            appTabs.pendingSession(tab.server, tab.sessionId)?.draft.directory ??
+            appTabs.info[tabKey(tab)]?.directory)
+      const project = session
+        ? ctx?.projects.forSession(session)
+        : directory
+          ? ctx?.projects.forDirectory(directory)
+          : undefined
+      const key = directory ? `${tab.server}\n${project?.worktree ?? directory}` : ""
+      const group = groups.get(key) ?? {
+        key,
+        tabs: [],
+        hideAvatars: !!directory,
+        header: directory ? (
+          <div class="flex items-center px-2 py-1 text-12-regular text-v2-text-text-faint">
+            <span class="min-w-0 flex-1 truncate">{displayName(project ?? { worktree: directory })}</span>
+            <Show when={project}>
+              {(value) => (
+                <IconButton
+                  type="button"
+                  data-action="vertical-tabs-project-settings"
+                  variant="ghost-muted"
+                  size="small"
+                  icon={<Icon name="edit" />}
+                  aria-label={language.t("project.settings.title")}
+                  onClick={() => settingsSurface.openProject({ server: tab.server, project: value().worktree })}
+                />
+              )}
+            </Show>
+          </div>
+        ) : undefined,
+      }
+      group.tabs.push(tab)
+      groups.set(key, group)
+    })
+    return [...groups.values()]
+  })
+
+  const displayTabs = createMemo(() => sections()?.flatMap((section) => section.tabs) ?? props.tabs)
+
+  const sectionOf = createMemo(
+    () => new Map(sections()?.flatMap((section) => section.tabs.map((tab) => [tabKey(tab), section.key] as const))),
+  )
+
+  let listRef!: HTMLDivElement
   let scrollRef!: HTMLDivElement
   // Each vertical edge feathers by as much as there is left to scroll past it, so it appears and leaves without a jump.
   const [fade, setFade] = createStore({ top: 0, bottom: 0 })
@@ -417,265 +683,247 @@ export function TitlebarTabStrip(props: {
     })
 
   onMount(() => {
-    if (vertical()) createResizeObserver([scrollRef, contentRef], measureFade)
+    if (vertical()) createResizeObserver([scrollRef, listRef], measureFade)
   })
-  const [visibility, setVisibility] = createStore<Record<string, boolean>>({})
   const [unread, setUnread] = createStore<Record<string, boolean>>({})
-  const isVisible = (tab: Tab) => tab.type === "draft" || !!visibility[tabKey(tab)]
+  const [tabLoads, setTabLoads] = createSignal(INITIAL_SESSION_TAB_LOADS_STATE)
+  const loadTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-  const tabProject = (tab: Tab) => {
-    const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-    const ctx = conn ? global.ensureServerCtx(conn) : undefined
-    const session = tab.type === "session" ? ctx?.data.session.get(tab.sessionId) : undefined
+  const dispatchTabLoads = (event: SessionTabLoadsEvent) =>
+    untrack(() => {
+      const previous = tabLoads()
+      const next = transitionSessionTabLoads(previous, event)
 
-    if (session) return ctx?.projects.forSession(session) ?? { worktree: session.location.directory }
+      if (next.state !== previous) setTabLoads(next.state)
+      next.effects.forEach(runTabLoadEffect)
+    })
 
-    const directory =
-      tab.type === "draft"
-        ? tab.directory
-        : (tabs.pendingSession(tab.server, tab.sessionId)?.draft.directory ?? tabs.info[tabKey(tab)]?.directory)
+  function runTabLoadEffect(effect: SessionTabLoadsEffect) {
+    if (effect.type === "load.clear") {
+      clearTimeout(loadTimers.get(effect.attempt))
+      loadTimers.delete(effect.attempt)
 
-    if (!directory) return
+      return
+    }
 
-    return ctx?.projects.forDirectory(directory) ?? { worktree: directory }
+    const ctx = global.serverCtx(effect.server)
+    const connected = () => global.serverCtx(effect.server)?.sdk.connection.status() === "connected"
+
+    loadTimers.set(
+      effect.attempt,
+      setTimeout(
+        () =>
+          dispatchTabLoads({
+            type: "load.timed-out",
+            key: effect.key,
+            attempt: effect.attempt,
+            connected: connected(),
+          }),
+        effect.timeoutMs,
+      ),
+    )
+
+    const settle = () => {
+      const current = global.serverCtx(effect.server)
+
+      dispatchTabLoads({
+        type: "load.settled",
+        key: effect.key,
+        attempt: effect.attempt,
+        cached: !!current?.data.session.get(effect.sessionID),
+        missing: !!current?.data.session.missing(effect.sessionID),
+        connected: connected(),
+      })
+    }
+
+    void (ctx?.data.session.sync(effect.sessionID) ?? Promise.resolve()).then(settle, settle)
   }
 
-  // Groups follow their first tab's place in the strip; tabs whose project is unknown lead without a header.
-  const groups = createMemo(() => {
-    if (!props.grouped) return [{ key: "", label: "", settings: undefined, tabs: props.tabs }]
+  // Runs before the visible order below reads it, so a session tab counts as visible in the same pass it appears.
+  createComputed(() => {
+    const tabs = props.tabs.flatMap((tab) => {
+      if (tab.type !== "session") return []
+      const ctx = global.serverCtx(tab.server)
+      const key = tabKey(tab)
 
-    const byKey = new Map<
-      string,
-      { key: string; label: string; settings: { server: string; project: string } | undefined; tabs: Tab[] }
-    >()
-
-    props.tabs.forEach((tab) => {
-      const project = tabProject(tab)
-      const key = project ? `${tab.server}\n${project.worktree}` : ""
-
-      const group = byKey.get(key) ?? {
-        key,
-        label: project ? displayName(project) : "",
-        // A folder the server has no project for has no settings page.
-        settings: project && "id" in project ? { server: tab.server, project: project.worktree } : undefined,
-        tabs: [],
-      }
-
-      group.tabs.push(tab)
-      byKey.set(key, group)
+      return [
+        {
+          key,
+          server: tab.server,
+          sessionID: tab.sessionId,
+          active: props.currentTab === tab,
+          pending: !!appTabs.pendingSession(tab.server, tab.sessionId),
+          cached: !!ctx?.data.session.get(tab.sessionId),
+          missing: !!ctx?.data.session.missing(tab.sessionId),
+          persistedTitle: !!appTabs.info[key]?.title,
+          serverReady: !!ctx,
+          connected: ctx?.sdk.connection.status() === "connected",
+        },
+      ]
     })
-    const list = [...byKey.values()]
 
-    return [...list.filter((group) => group.key === ""), ...list.filter((group) => group.key !== "")]
+    dispatchTabLoads({ type: "sync", tabs })
   })
 
-  const visibleTabs = createMemo(() => groups().flatMap((group) => group.tabs.filter(isVisible)))
+  onCleanup(() => dispatchTabLoads({ type: "disposed" }))
+
+  const views = createMemo(() => {
+    const state = tabLoads()
+
+    return new Map(
+      props.tabs.flatMap((tab) => {
+        if (tab.type !== "session") return []
+        const ctx = global.serverCtx(tab.server)
+        const key = tabKey(tab)
+
+        return [
+          [
+            key,
+            selectSessionTabView(state, key, {
+              active: props.currentTab === tab,
+              pending: appTabs.pendingSession(tab.server, tab.sessionId),
+              session: ctx?.data.session.get(tab.sessionId),
+              missing: !!ctx?.data.session.missing(tab.sessionId),
+              persisted: appTabs.info[key],
+              serverReady: !!ctx,
+            }),
+          ] as const,
+        ]
+      }),
+    )
+  })
+
+  const visibleTabs = createMemo(() =>
+    displayTabs().filter((tab) => tab.type === "draft" || !!views().get(tabKey(tab))?.visible),
+  )
+
   const visibleTabIds = () => visibleTabs().map(tabKey)
+
+  const leading = () => (vertical() ? props.leading : undefined)
+
+  const leadingKeys = () => leading()?.keys ?? []
 
   // Tells the closed sidebar's toggle whether any row here shows its unread dot, which the current tab never does.
   createEffect(() => {
     if (!vertical()) return
-    setSidebarUnread(props.tabs.some((tab) => tab !== props.currentTab && !!unread[tabKey(tab)]))
+    const current = props.currentTab ? tabKey(props.currentTab) : undefined
+
+    setSidebarUnread(
+      props.tabs.some((tab) => tab !== props.currentTab && !!unread[tabKey(tab)]) ||
+        leadingKeys().some((key) => key !== current && !!leading()?.unread(key)),
+    )
     onCleanup(() => setSidebarUnread(false))
   })
 
-  command.register("titlebar-tab-cycle", () => [
-    {
-      id: `tab.prev`,
-      category: "tab",
-      title: "",
-      keybind: `mod+option+ArrowLeft,ctrl+shift+tab`,
-      hidden: true,
-      onSelect: () => selectAdjacentTab(-1),
-    },
-    {
-      id: `tab.next`,
-      category: "tab",
-      title: "",
-      keybind: `mod+option+ArrowRight,ctrl+tab`,
-      hidden: true,
-      onSelect: () => selectAdjacentTab(1),
-    },
-    {
-      ...previousSessionCommand,
-      category: language.t("command.category.session"),
-      title: language.t("command.session.previous"),
-      onSelect: () => selectAdjacentTab(-1),
-    },
-    {
-      ...nextSessionCommand,
-      category: language.t("command.category.session"),
-      title: language.t("command.session.next"),
-      onSelect: () => selectAdjacentTab(1),
-    },
-    {
-      id: "session.previous.unseen",
-      category: language.t("command.category.session"),
-      title: language.t("command.session.previous.unseen"),
-      keybind: "shift+alt+arrowup",
-      onSelect: () => selectAdjacentTab(-1, (key) => !!unread[key]),
-    },
-    {
-      id: "session.next.unseen",
-      category: language.t("command.category.session"),
-      title: language.t("command.session.next.unseen"),
-      keybind: "shift+alt+arrowdown",
-      onSelect: () => selectAdjacentTab(1, (key) => !!unread[key]),
-    },
-  ])
-
-  // One registration numbers the visible tabs, so a reorder, a close or a tab coming into view never leaves two tabs
-  // holding the same number while their owners update.
+  // Number keys reveal the tab they pick; the other shortcuts follow the selection.
   const tabRefs = new Map<string, () => HTMLDivElement | undefined>()
 
-  command.register("titlebar-tab-numbers", () =>
-    visibleTabs()
-      .slice(0, 9)
-      .map((tab, index) => ({
-        id: `tab.${index + 1}`,
-        category: "tab",
-        title: "",
-        keybind: `mod+${index + 1}`,
-        hidden: true,
-        onSelect: () => props.onNavigate(tab, tabRefs.get(tabKey(tab))?.()),
-      })),
-  )
+  const hints = createSessionRowNavigation({
+    keys: () => [...leadingKeys(), ...visibleTabIds()],
+    current: () => (props.currentTab ? tabKey(props.currentTab) : undefined),
+    unread: (key) => !!unread[key] || (leadingKeys().includes(key) && !!leading()?.unread(key)),
+    navigate: (key, reveal) => {
+      if (leadingKeys().includes(key)) {
+        leading()?.navigate(key, reveal)
 
-  function selectAdjacentTab(offset: -1 | 1, include?: (key: string) => boolean) {
-    const current = props.currentTab
-    const key = adjacentTabKey(visibleTabIds(), current ? tabKey(current) : undefined, offset, include)
-    const next = props.tabs.find((tab) => tabKey(tab) === key)
+        return
+      }
 
-    if (next) props.onNavigate(next)
+      const tab = props.tabs.find((item) => tabKey(item) === key)
+
+      if (tab) props.onNavigate(tab, reveal ? tabRefs.get(key)?.() : undefined)
+    },
+  })
+
+  const shortcut = (index: number) => {
+    if (index < 0) return
+    const position = index + leadingKeys().length
+
+    return position < 9 ? position + 1 : undefined
   }
 
-  // Each list reorders only among its own tabs, so a grouped tab cannot be dragged into another project.
-  const tabList = (list: () => Tab[], onList?: (element: HTMLDivElement) => void) => {
-    let listRef!: HTMLDivElement
-    const listVisible = createMemo(() => list().filter(isVisible))
+  function renderTab(tab: Tab, section?: TabStripSection) {
+    const id = tabKey(tab)
+
+    const group = section?.key
+    let ref!: HTMLDivElement
+    const visibleIndex = () => visibleTabs().findIndex((item) => tabKey(item) === id)
+
+    const others = () => visibleTabs().filter((item) => tabKey(item) !== id)
+
+    const after = () => visibleTabs().slice(visibleIndex() + 1)
+
+    const closeOthers = () => props.onCloseTabs(others(), tab)
+
+    const closeAfter = () => props.onCloseTabs(after(), tab)
+
+    const element = () => ref
+    tabRefs.set(id, element)
+    onCleanup(() => {
+      if (tabRefs.get(id) === element) tabRefs.delete(id)
+    })
+
+    const serverCtx = useServerCtx(() => {
+      if (tab.type !== "session") return
+
+      return global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+    })
+
+    const footer = createMemo(() => (vertical() ? props.tabFooter?.(tab) : undefined))
+
+    const label = () => (vertical() ? props.tabLabel?.(tab) : undefined)
+
+    if (tab.type === "session") {
+      return (
+        <SessionTabEntry
+          tab={tab}
+          currentTab={props.currentTab}
+          id={id}
+          index={visibleIndex()}
+          group={group}
+          footer={footer()}
+          label={label()}
+          hideAvatar={section?.hideAvatars}
+          active={props.currentTab === tab}
+          highlightActive={props.highlightActive}
+          orientation={vertical() ? "vertical" : "horizontal"}
+          serverCtx={serverCtx()}
+          view={views().get(id) ?? hiddenTabView}
+          shortcut={shortcut(visibleIndex())}
+          muted={vertical() ? props.tabMuted?.(tab) : undefined}
+          menuItems={vertical() && props.tabMenu ? () => props.tabMenu?.(tab) : undefined}
+          onUnreadChange={(value) => setUnread(id, value)}
+          onNavigate={(element) => {
+            ref = element
+            props.onNavigate(tab, element)
+          }}
+          onClose={() => props.onClose(tab)}
+          onCloseOthers={others().length ? closeOthers : undefined}
+          onCloseAfter={after().length ? closeAfter : undefined}
+        />
+      )
+    }
 
     return (
-      <DragDropProvider
-        sensors={[
-          PointerSensor.configure({
-            activationConstraints: (event) =>
-              event.pointerType === "touch"
-                ? [new PointerActivationConstraints.Distance({ value: 8 })]
-                : [new PointerActivationConstraints.Distance({ value: 4 })],
-            preventActivation: (event) =>
-              event.target instanceof Element &&
-              !!event.target.closest(
-                '[data-slot="tab-close"], [contenteditable="true"], [contenteditable="plaintext-only"]',
-              ),
-          }),
-        ]}
-        modifiers={[
-          vertical() ? RestrictToVerticalAxis : RestrictToHorizontalAxis,
-          RestrictToElement.configure({ element: () => listRef }),
-        ]}
-        plugins={(defaults) => [
-          ...defaults.filter((plugin) => plugin !== Accessibility),
-          AutoScroller.configure({ acceleration: 8, threshold: vertical() ? { x: 0, y: 0.05 } : { x: 0.05, y: 0 } }),
-          Feedback.configure({ dropAnimation: null }),
-        ]}
-        onDragStart={(event) => {
-          const source = event.operation.source
-
-          if (!source) return
-          const tab = props.tabs.find((item) => tabKey(item) === source.id.toString())
-
-          if (!tab) return
-
-          if (vertical()) return
-          const tabEl = source.element?.querySelector<HTMLDivElement>("[data-titlebar-tab]")
-          props.onNavigate(tab, tabEl ?? undefined)
+      <DraftTabSlot
+        tab={tab}
+        id={id}
+        index={visibleIndex()}
+        group={group}
+        footer={footer()}
+        label={label()}
+        active={props.currentTab === tab && props.highlightActive !== false}
+        orientation={vertical() ? "vertical" : "horizontal"}
+        title={language.t("session.tab.session")}
+        shortcut={shortcut(visibleIndex())}
+        onNavigate={(element) => {
+          ref = element
+          props.onNavigate(tab, element)
         }}
-        onDragEnd={(event) => {
-          const current = listVisible().map(tabKey)
-          const source = event.operation.source
-
-          if (event.canceled || !isSortable(source)) return
-
-          const { initialIndex, index } = source
-
-          if (initialIndex !== index) {
-            props.onReorder(
-              mergeVisibleTabOrder(
-                props.tabs.map(tabKey),
-                current,
-                arrayMove(current, source.initialIndex, source.index),
-              ),
-            )
-          }
-        }}
-      >
-        <div
-          data-titlebar-tab-list
-          data-orientation={vertical() ? "vertical" : "horizontal"}
-          class="flex w-full min-w-0"
-          classList={{ "flex-row items-center": !vertical(), "flex-col items-stretch": vertical() }}
-          ref={(element) => {
-            listRef = element
-            onList?.(element)
-          }}
-        >
-          <For each={list()}>
-            {(tab) => {
-              const id = tabKey(tab)
-              let ref!: HTMLDivElement
-              const visibleIndex = () => listVisible().findIndex((item) => tabKey(item) === id)
-              const element = () => ref
-              tabRefs.set(id, element)
-              onCleanup(() => {
-                if (tabRefs.get(id) === element) tabRefs.delete(id)
-              })
-
-              const serverCtx = useServerCtx(() => {
-                if (tab.type !== "session") return
-
-                return global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-              })
-
-              if (tab.type === "session") {
-                return (
-                  <SessionTabEntry
-                    tab={tab}
-                    currentTab={props.currentTab}
-                    id={id}
-                    index={visibleIndex()}
-                    active={props.currentTab === tab}
-                    orientation={vertical() ? "vertical" : "horizontal"}
-                    serverCtx={serverCtx()}
-                    onVisibleChange={(visible) => setVisibility(id, visible)}
-                    onUnreadChange={(value) => setUnread(id, value)}
-                    onNavigate={(element) => {
-                      ref = element
-                      props.onNavigate(tab, element)
-                    }}
-                    onClose={() => props.onClose(tab)}
-                  />
-                )
-              }
-
-              return (
-                <DraftTabSlot
-                  tab={tab}
-                  id={id}
-                  index={visibleIndex()}
-                  active={props.currentTab === tab}
-                  orientation={vertical() ? "vertical" : "horizontal"}
-                  title={language.t("session.tab.session")}
-                  onNavigate={(element) => {
-                    ref = element
-                    props.onNavigate(tab, element)
-                  }}
-                  onClose={() => props.onClose(tab)}
-                />
-              )
-            }}
-          </For>
-        </div>
-      </DragDropProvider>
+        onClose={() => props.onClose(tab)}
+        onCloseOthers={others().length ? closeOthers : undefined}
+        onCloseAfter={after().length ? closeAfter : undefined}
+      />
     )
   }
 
@@ -683,6 +931,7 @@ export function TitlebarTabStrip(props: {
     <div
       data-slot={vertical() ? "vertical-tabs" : "titlebar-tabs"}
       data-orientation={vertical() ? "vertical" : "horizontal"}
+      data-shortcut-hints={hints() ? "" : undefined}
       class="relative min-w-0"
       classList={{ "min-h-0 overflow-hidden": vertical() }}
     >
@@ -703,53 +952,80 @@ export function TitlebarTabStrip(props: {
           if (vertical()) measureFade()
         }}
       >
-        <Show
-          when={props.grouped}
-          fallback={tabList(
-            () => props.tabs,
-            (element) => (contentRef = element),
-          )}
-        >
-          <div ref={contentRef} class="flex w-full min-w-0 flex-col gap-3">
-            <For each={groups().map((group) => group.key)}>
-              {(key) => {
-                const group = createMemo(() => groups().find((item) => item.key === key))
-                const shown = () => !!group()?.tabs.some(isVisible)
+        {leading()?.content}
+        <DragDropProvider
+          sensors={[
+            PointerSensor.configure({
+              activationConstraints: (event) =>
+                event.pointerType === "touch"
+                  ? [new PointerActivationConstraints.Distance({ value: 8 })]
+                  : [new PointerActivationConstraints.Distance({ value: 4 })],
+              preventActivation: (event) =>
+                event.target instanceof Element &&
+                !!event.target.closest(
+                  '[data-slot="tab-close"], [contenteditable="true"], [contenteditable="plaintext-only"]',
+                ),
+            }),
+          ]}
+          modifiers={[
+            vertical() ? RestrictToVerticalAxis : RestrictToHorizontalAxis,
+            RestrictToElement.configure({ element: () => listRef }),
+          ]}
+          plugins={(defaults) => [
+            ...defaults.filter((plugin) => plugin !== Accessibility),
+            AutoScroller.configure({ acceleration: 8, threshold: vertical() ? { x: 0, y: 0.05 } : { x: 0.05, y: 0 } }),
+            Feedback.configure({ dropAnimation: null }),
+          ]}
+          onDragStart={(event) => {
+            const source = event.operation.source
 
-                return (
-                  // Hidden, not unmounted: a session tab must stay mounted to load and become visible.
-                  <div classList={{ "flex flex-col gap-px": shown(), hidden: !shown() }}>
-                    <Show when={group()?.label}>
-                      {(label) => (
-                        <div class="flex items-center">
-                          <div class="min-w-0 flex-1">
-                            <SectionHeader label={label()} />
-                          </div>
-                          <Show when={group()?.settings}>
-                            {(settings) => (
-                              <Tooltip placement="right" value={language.t("project.settings.title")} class="shrink-0">
-                                <IconButton
-                                  type="button"
-                                  data-action="vertical-tabs-project-settings"
-                                  variant="ghost-muted"
-                                  size="small"
-                                  icon={<Icon name="edit" />}
-                                  aria-label={language.t("project.settings.title")}
-                                  onClick={() => settingsSurface.openProject(settings())}
-                                />
-                              </Tooltip>
-                            )}
-                          </Show>
-                        </div>
-                      )}
-                    </Show>
-                    {tabList(() => group()?.tabs ?? [])}
-                  </div>
-                )
-              }}
-            </For>
+            if (!source) return
+            const tab = props.tabs.find((item) => tabKey(item) === source.id.toString())
+
+            if (!tab) return
+
+            if (vertical()) return
+            const tabEl = source.element?.querySelector<HTMLDivElement>("[data-titlebar-tab]")
+            props.onNavigate(tab, tabEl ?? undefined)
+          }}
+          onDragEnd={(event) => {
+            const current = visibleTabIds()
+            const source = event.operation.source
+
+            if (event.canceled || !isSortable(source)) return
+
+            const { initialIndex, index } = source
+
+            if (initialIndex === index) return
+            const next = arrayMove(current, initialIndex, index)
+
+            // Sections are contiguous, so a move within one keeps every position's section.
+            if (sections() && next.some((key, i) => sectionOf().get(key) !== sectionOf().get(current[i]))) return
+            props.onReorder(mergeVisibleTabOrder(props.tabs.map(tabKey), current, next))
+          }}
+        >
+          <div
+            data-titlebar-tab-list
+            data-orientation={vertical() ? "vertical" : "horizontal"}
+            class="flex w-full min-w-0"
+            classList={{ "flex-row items-center": !vertical(), "flex-col items-stretch": vertical() }}
+            ref={listRef}
+          >
+            <Show when={sections()} fallback={<For each={props.tabs}>{(tab) => renderTab(tab)}</For>}>
+              {(list) => (
+                <Key each={list()} by={(section) => section.key}>
+                  {(section) => (
+                    <>
+                      {section().header}
+                      <For each={section().tabs}>{(tab) => renderTab(tab, section())}</For>
+                      {section().footer}
+                    </>
+                  )}
+                </Key>
+              )}
+            </Show>
           </div>
-        </Show>
+        </DragDropProvider>
       </div>
       <Show when={!vertical()}>
         <div
